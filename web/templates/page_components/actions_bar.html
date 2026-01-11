@@ -1,0 +1,79 @@
+{% macro actions_bar(title=None, actions=None, sections=None, align='end', more_label='More') %}
+{# safe defaults #}
+{% if actions is none %}{% set actions = [] %}{% endif %}
+{% if sections is none %}{% set sections = [] %}{% endif %}
+{% set is_center = (align == 'center') %}
+
+<div class="pagebar{% if is_center %} pagebar--three{% endif %}">
+  {% if title %}<h1 class="pagebar__title">{{ title }}</h1>{% endif %}
+
+  <div class="pagebar__actions actions-bar"{% if is_center %} style="justify-self:center"{% endif %}>
+
+    {# A) Inline primary buttons (if any) #}
+    {% for a in actions %}
+      {% if not a.hidden and not a.menu %}
+        {% if a.href %}
+          <a id="{{ a.id }}" href="{{ a.href }}" class="btn {{ a.variant or '' }}"
+             data-action="{{ a.action or '' }}"{% if a.target %} target="{{ a.target }}"{% endif %}>{{ a.label }}</a>
+        {% else %}
+          <button id="{{ a.id }}" type="button" class="btn {{ a.variant or '' }}"
+                  data-action="{{ a.action or '' }}">{{ a.label }}</button>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+
+    {# B) Overflow menu for inline actions marked menu=True #}
+    {% set ns = namespace(has_overflow=false) %}
+    {% for a in actions %}
+      {% if a.menu and not a.hidden %}{% set ns.has_overflow = true %}{% endif %}
+    {% endfor %}
+    {% if ns.has_overflow %}
+      <div class="actions__more">
+        <button type="button" class="btn btn--ghost" data-more-toggle>{{ more_label }} ▾</button>
+        <div class="actions__menu" hidden>
+          {% for a in actions %}
+            {% if a.menu and not a.hidden %}
+              {% if a.href %}
+                <a id="{{ a.id }}" href="{{ a.href }}" class="menu__item"
+                   data-action="{{ a.action or '' }}"{% if a.target %} target="{{ a.target }}"{% endif %}>{{ a.label }}</a>
+              {% else %}
+                <button id="{{ a.id }}" type="button" class="menu__item"
+                        data-action="{{ a.action or '' }}">{{ a.label }}</button>
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {# C) Grouped dropdown sections #}
+    {% for sec in sections %}
+      {% if not sec.hidden %}
+        <div class="actions__more">
+          <button type="button" class="btn {{ sec.variant or '' }}" data-more-toggle>{{ sec.label }} ▾</button>
+          <div class="actions__menu" hidden>
+            {% for a in sec['items'] %}
+              {% if a == 'sep' %}
+                <hr class="menu__sep">
+              {% else %}
+                {% if not a.hidden %}
+                  {% if a.href %}
+                    <a id="{{ a.id }}" href="{{ a.href }}" class="menu__item"
+                       data-action="{{ a.action or '' }}"{% if a.target %} target="{{ a.target }}"{% endif %}>{{ a.label }}</a>
+                  {% else %}
+                    <button id="{{ a.id }}" type="button" class="menu__item"
+                            data-action="{{ a.action or '' }}">{{ a.label }}</button>
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+
+  </div>
+
+  {% if is_center %}<div class="pagebar__spacer"></div>{% endif %}
+</div>
+{% endmacro %}

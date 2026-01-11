@@ -1,0 +1,422 @@
+/* FINAL VERSION OF /static/css/message_cycles.css
+   This version:
+   - Keeps the existing 2-column .mc-* layout and modal structure.
+   - Uses the user's theme variables for brand accents:
+       var(--brand-700) instead of hardcoded #0f172a
+   - Leaves neutral grays (#e2e8f0, #f8fafc, etc.) alone.
+   - Includes the preview block (.mc-step-body / .mc-step-preview) so users can read the email body.
+*/
+
+/* =========================================
+   BASE TYPOGRAPHY / PALETTE
+   ========================================= */
+.mc-layout,
+.mc-modal,
+.mc-btn,
+.mc-input {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--brand-700);
+}
+
+/* =========================================
+   MAIN 2-COLUMN LAYOUT
+   ========================================= */
+.mc-layout {
+  display: flex;
+  min-height: calc(100vh - 160px);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  color: var(--brand-700);
+}
+
+/* =========================================
+   LEFT SIDEBAR (cycles list)
+   ========================================= */
+.mc-sidebar {
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.mc-sidebar-head {
+  padding: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.mc-sidebar-head-top {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-700);
+  line-height: 1.3;
+}
+.mc-sidebar-head-sub {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.mc-sidebar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mc-cycle-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+/* individual cycle rows */
+.mc-cycle-row {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 10px 16px;
+  border-left: 3px solid transparent;
+  display: block;
+}
+.mc-cycle-row:hover {
+  background: #f8fafc;
+}
+.mc-cycle-row.is-active {
+  background: #f1f5f9;
+  border-left-color: var(--brand-700);
+}
+.mc-cycle-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.mc-cycle-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-700);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.mc-cycle-row-menu {
+  font-size: 14px;
+  line-height: 1;
+  color: #64748b;
+}
+.mc-cycle-row-bottom {
+  margin-top: 4px;
+}
+.mc-cycle-row-meta {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* =========================================
+   RIGHT COLUMN (selected cycle / steps)
+   ========================================= */
+.mc-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+/* cycle header (name + Add step button) */
+.mc-detail-head {
+  padding: 16px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.mc-detail-head-main {
+  min-width: 0;
+}
+.mc-detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-700);
+  line-height: 1.3;
+}
+.mc-detail-meta {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+  margin-top: 2px;
+  word-break: break-word;
+}
+.mc-detail-head-actions {
+  flex-shrink: 0;
+}
+
+/* steps list container */
+.mc-steps-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px 16px;
+  background: #fff;
+}
+
+/* =========================================
+   STEP CARD (collapsible preview for each step)
+   ========================================= */
+.mc-step-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  margin-bottom: 10px;
+}
+
+/* header row inside each step card */
+.mc-step-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+.mc-step-head-left {
+  min-width: 0;
+}
+.mc-step-title {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--brand-700);
+  word-break: break-word;
+}
+.mc-step-arrow {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--brand-700);
+}
+.mc-step-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* chip styles (channel / tone) */
+.mc-chip {
+  display: inline-block;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 6px;
+  color: #475569;
+  background: #fff;
+}
+
+/* right-side buttons in the step header */
+.mc-step-head-right {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* =========================================
+   STEP BODY (the collapsible content you see after clicking a step)
+   ========================================= */
+.mc-step-body {
+  border-top: 1px solid #e2e8f0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--brand-700);
+  background: #f8fafc;
+  display: none; /* message_cycles.js will reveal this when expanded */
+}
+
+.mc-step-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mc-step-label {
+  font-weight: 500;
+  color: #64748b;
+  min-width: 80px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mc-step-value {
+  color: var(--brand-700);
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* this is the actual message body preview text */
+.mc-step-preview {
+  white-space: pre-wrap;
+  color: #334155;
+}
+
+/* =========================================
+   BUTTONS (reused across sidebar, header, step actions)
+   ========================================= */
+.mc-btn {
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 6px 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: #fff;
+  color: var(--brand-700);
+}
+.mc-btn[disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.mc-btn--primary {
+  background: var(--brand-700);
+  color: #fff;
+  border-color: var(--brand-700);
+}
+.mc-btn--ghost {
+  background: #fff;
+  border-color: #cbd5e1;
+  color: var(--brand-700);
+}
+.mc-btn--danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+.mc-btn--sm {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.mc-btn--xs {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* =========================================
+   MODALS (Add Step / Edit Step)
+   ========================================= */
+.mc-modal.hidden {
+  display: none;
+}
+.mc-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9990;
+  color: var(--brand-700);
+}
+.mc-modal__box {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  min-width: 320px;
+  max-width: 360px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+}
+.mc-modal__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.mc-modal__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-700);
+}
+.mc-modal__close {
+  background: transparent;
+  border: 0;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: #64748b;
+}
+.mc-modal__body {
+  padding: 16px;
+}
+.mc-modal__foot {
+  padding: 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* =========================================
+   FORM FIELDS INSIDE MODALS
+   ========================================= */
+.mc-field {
+  margin-bottom: 12px;
+}
+.mc-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand-700);
+  line-height: 1.3;
+  display: block;
+  margin-bottom: 4px;
+}
+.mc-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--brand-700);
+}
+.mc-hint {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 4px;
+}
+.mc-error {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+/* =========================================
+   CUSTOM SCROLLBARS
+   ========================================= */
+.mc-cycle-list::-webkit-scrollbar,
+.mc-steps-list::-webkit-scrollbar {
+  width: 6px;
+}
+.mc-cycle-list::-webkit-scrollbar-thumb,
+.mc-steps-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}

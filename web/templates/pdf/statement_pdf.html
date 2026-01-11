@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Statement - {{ customer.name|e }}</title>
+  <style>
+    /* Base typography to match app */
+    html, body { color:#111; font-size: 13px; line-height:1.35; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,'Helvetica Neue',Helvetica,sans-serif; }
+    @page { size: A4 portrait; margin: 10mm; }
+
+    /* Layout blocks */
+    .stmt { }
+    .stmt h1 { font-size: 20px; margin: 0 0 8px; font-weight:700; }
+    .stmt h2 { font-size: 14px; margin: 12px 0 6px; font-weight:700; }
+    .panel { margin-top: 12px; padding: 12px; background:#fff; border:1px solid #e5e7eb; border-radius: 10px; }
+    .panel__head { padding: 0 0 6px 0; border: none; }
+
+    /* Letterhead */
+    .head-table { width:100%; table-layout: fixed; }
+    .head-table td { vertical-align: top; }
+    .st-brand { width: 50%; }
+    .st-meta  { width: 50%; text-align:right; }
+    .doc-title { text-align:center; font-size:20px; font-weight:700; margin-bottom: 6px; }
+    .doc-sub   { text-align:center; color:#666; font-size:12px; margin-bottom: 8px; }
+    .label { font-weight:700; font-size:12px; color:#111; margin-bottom:4px; }
+    .org-logo{ display:block; width:auto; height:auto; max-height:60px; max-width:240px; object-fit:contain; }
+    .muted { color:#666; }
+    .right { text-align:right; }
+
+    /* KPI cards (use table for wkhtmltopdf compatibility; CSS grid isn't supported) */
+    .kpis-table { width:100%; border-collapse: separate; border-spacing: 10px; table-layout: fixed; }
+    .kpis-table td { width:16.66%; vertical-align: top; }
+    .kpi  { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
+    .kpi__label { font-size:11px; margin-bottom: 4px; color:#666; }
+    .kpi__value { font-size:16px; font-weight:700; }
+
+    /* Table */
+    table { width:100%; border-collapse: collapse; }
+    thead th { background:#f8fafc; border-bottom:1px solid #e5e7eb; text-align:left; font-weight:700; }
+    tbody td { border-bottom:1px solid #f3f4f6; }
+    th, td { padding:6px 8px; line-height:1.25; }
+
+    /* Pagination friendliness */
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr    { page-break-inside: avoid; }
+  </style>
+  {% set asof = summary.as_of %}
+</head>
+<body>
+  <div class="stmt">
+    <!-- Letterhead / meta -->
+    <section class="panel">
+      {% if org_logo_data_uri or org_logo_file_url or org_logo_url %}
+        <div style="text-align:center; margin-bottom:6px;">
+          <img class="org-logo" src="{{ org_logo_data_uri or org_logo_file_url or org_logo_url }}" alt="Logo" style="max-height:54px;">
+        </div>
+      {% endif %}
+      <div class="doc-title">STATEMENT</div>
+      <div class="doc-sub">As at {{ asof }}</div>
+      <table class="head-table">
+        <tr>
+          <td class="st-brand">
+            <div class="label">FROM:</div>
+            {% if org_address %}
+            <div class="muted" style="white-space:pre-line;">{{ org_address }}</div>
+            {% endif %}
+          </td>
+          <td class="st-meta">
+            <div class="label" style="text-align:right;">TO:</div>
+            <div style="margin-top:4px; text-align:right;">
+              <strong>{{ customer.name }}</strong>
+              {% set addr_lines = [] %}
+              {% if customer.billing_line1 %}{% set _ = addr_lines.append(customer.billing_line1) %}{% endif %}
+              {% if customer.billing_line2 %}{% set _ = addr_lines.append(customer.billing_line2) %}{% endif %}
+              {% if customer.billing_city %}{% set _ = addr_lines.append(customer.billing_city) %}{% endif %}
+              {% if customer.billing_region %}{% set _ = addr_lines.append(customer.billing_region) %}{% endif %}
+              {% if customer.billing_postcode %}{% set _ = addr_lines.append(customer.billing_postcode) %}{% endif %}
+              {% if customer.billing_country %}{% set _ = addr_lines.append(customer.billing_country) %}{% endif %}
+              {% if addr_lines %}
+                <div style="white-space:pre-line; margin-top:4px;">{{ addr_lines | join('\n') }}</div>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      </table>
+    </section>
+
+    <!-- Aging summary -->
+    <section class="panel">
+      <div class="panel__head"><h2>Aging summary</h2></div>
+      <table class="kpis-table">
+        <tr>
+          <td><div class="kpi"><div class="kpi__label">Total outstanding</div><div class="kpi__value">£{{ '%.2f'|format(summary.totals.total_outstanding_gross) }}</div></div></td>
+          <td><div class="kpi"><div class="kpi__label">Overdue</div><div class="kpi__value">£{{ '%.2f'|format(summary.totals.overdue_total) }}</div></div></td>
+          <td><div class="kpi"><div class="kpi__label">Overdue 0–30 days</div><div class="kpi__value">£{{ '%.2f'|format(summary.buckets.overdue_0_30) }}</div></div></td>
+          <td><div class="kpi"><div class="kpi__label">Overdue 31–60 days</div><div class="kpi__value">£{{ '%.2f'|format(summary.buckets.overdue_31_60) }}</div></div></td>
+          <td><div class="kpi"><div class="kpi__label">Overdue 61–90 days</div><div class="kpi__value">£{{ '%.2f'|format(summary.buckets.overdue_61_90) }}</div></div></td>
+          <td><div class="kpi"><div class="kpi__label">Overdue 90+ days</div><div class="kpi__value">£{{ '%.2f'|format(summary.buckets.overdue_90p) }}</div></div></td>
+        </tr>
+      </table>
+      <div class="muted" style="margin:6px 0;">Unallocated credits: <strong>£{{ '%.2f'|format(summary.totals.unallocated_credits) }}</strong></div>
+    </section>
+
+    <!-- Open items -->
+    <section class="panel">
+      <div class="panel__head"><h2>Open invoices (unpaid &amp; part-paid)</h2></div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:120px;">Invoice date</th>
+            <th style="width:120px;">Ref</th>
+            <th>Description</th>
+            <th class="right" style="width:140px;">Total</th>
+            <th class="right" style="width:140px;">Paid</th>
+            <th class="right" style="width:160px;">Outstanding</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if summary.open_invoices %}
+            {% set ns = namespace(run_out=0.0) %}
+            {% for it in summary.open_invoices|sort(attribute='issue_date') %}
+              {% set ns.run_out = ns.run_out + (it.outstanding or 0.0) %}
+              <tr>
+                <td>{{ it.issue_date or '' }}</td>
+                <td>{{ it.ref }}</td>
+                <td>{{ it.desc }}</td>
+                <td class="right">£{{ '%.2f'|format(it.total) }}</td>
+                <td class="right">£{{ '%.2f'|format(it.paid_to_date) }}</td>
+                <td class="right"><strong>£{{ '%.2f'|format(ns.run_out) }}</strong></td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="muted">No open items for this period.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+      <div style="margin-top:12px; text-align:right;">
+        <strong>Balance due: £{{ '%.2f'|format(summary.totals.balance_due) }}</strong>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

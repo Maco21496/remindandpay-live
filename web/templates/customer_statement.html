@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% set title = customer.name ~ " · Statement" %}
+
+{% block head %}
+  <link rel="stylesheet" href="/static/css/customer_statement.css">
+{% endblock %}
+
+{% block content %}
+<div class="stmt">
+
+  <!-- Pagebar -->
+  <div class="pagebar">
+    <h1>Statement — {{ customer.name }}</h1>
+    <div class="pagebar__actions">
+      <button id="btn_email_statement" class="btn btn--subtle">Email statement</button>
+      <button id="btn_download_pdf" class="btn btn--ghost">Download PDF</button>
+      <button onclick="window.print()" class="btn btn--ghost">Print / Save PDF</button>
+    </div>
+  </div>
+
+  <!-- Boot data for JS -->
+  <div id="st-boot"
+       data-id="{{ customer.id }}"
+       data-name="{{ customer.name|e }}"
+       data-email="{{ customer.email or '' }}"
+       data-line1="{{ customer.billing_line1 or '' }}"
+       data-line2="{{ customer.billing_line2 or '' }}"
+       data-city="{{ customer.billing_city or '' }}"
+       data-region="{{ customer.billing_region or '' }}"
+       data-postcode="{{ customer.billing_postcode or '' }}"
+       data-country="{{ customer.billing_country or '' }}"
+       hidden></div>
+
+  <!-- Letterhead -->
+  <section class="panel" style="margin-top:12px;padding:16px;">
+    <div class="st-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:24px;">
+      <div class="st-brand" style="min-width:260px;">
+        <img id="st_logo" class="org-logo" alt="Company logo" style="display:none;">
+        <div id="st_org_addr" class="muted" style="white-space:pre-line;margin-top:8px;"></div>
+      </div>
+      <div class="st-meta" style="text-align:right;">
+        <div style="font-size:22px;font-weight:700;">STATEMENT</div>
+        <div id="st_asof" class="muted" style="margin-top:4px;"></div>
+        <div id="st_cust_addr" style="white-space:pre-line;margin-top:10px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Filters -->
+  <div class="subpanel">
+    <div class="field-row" style="align-items:end; gap:12px;">
+      <div class="field" style="min-width:220px;">
+        <label>Period</label>
+        <select id="st_period" style="height:36px;padding:0 8px;"></select>
+      </div>
+      <div class="field">
+        <label>From</label>
+        <input id="st_from" type="date" style="height:36px;padding:0 8px;" disabled>
+      </div>
+      <div class="field">
+        <label>To (as of)</label>
+        <input id="st_to" type="date" style="height:36px;padding:0 8px;" disabled>
+      </div>
+      <div class="field" style="min-width:260px;">
+        <label>&nbsp;</label>
+        <label class="chk" style="display:flex;align-items:center;gap:8px;">
+          <input id="st_inc_after" type="checkbox"> Include payments after ‘To’ date
+        </label>
+      </div>
+      <button id="st_run" type="button" class="btn">Run</button>
+    </div>
+  </div>
+
+  <!-- Aging summary (by due date) -->
+  <section class="panel" style="margin-top:12px;">
+    <div class="panel__head"><h2>Aging summary</h2></div>
+    <div class="kpis" style="grid-template-columns:repeat(6,1fr);padding:12px;">
+      <div class="kpi"><div class="kpi__label">Total outstanding</div><div id="ag_total_out" class="kpi__value">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Overdue</div><div id="ag_overdue" class="kpi__value">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Overdue 0–30 days</div><div id="ag_od_0_30" class="kpi__value">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Overdue 31–60 days</div><div id="ag_od_31_60" class="kpi__value">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Overdue 61–90 days</div><div id="ag_od_61_90" class="kpi__value">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Overdue 90+ days</div><div id="ag_od_90p" class="kpi__value">£0.00</div></div>
+    </div>
+
+    <!-- Optional: show unallocated credit total so the balances reconcile -->
+    <div class="muted" style="margin:6px 12px 12px;">
+      Unallocated credits: <strong id="ag_unalloc">£0.00</strong>
+    </div>
+  </section>
+
+  <!-- Open items only -->
+  <section class="panel" style="margin-top:12px;">
+    <div class="panel__head"><h2>Open invoices (unpaid &amp; part-paid)</h2></div>
+    <div style="padding:12px;">
+      <table id="st_table">
+        <thead>
+          <tr>
+            <th style="width:120px;">Invoice date</th>
+            <th style="width:120px;">Ref</th>
+            <th>Description</th>
+            <th style="text-align:right;width:140px;">Total</th>
+            <th style="text-align:right;width:140px;">Paid</th>
+            <th style="text-align:right;width:160px;">Outstanding</th>
+          </tr>
+        </thead>
+        <tbody id="st_rows"></tbody>
+      </table>
+      <div id="st_empty" class="empty" style="display:none;">No open items for this period.</div>
+    </div>
+  </section>
+
+  <!-- Page logic -->
+  <script src="/static/js/customer_statement.js"></script>
+
+  <!-- Email statement wizard (unchanged) -->
+  {% include "customer_statement_email_wizard.html" %}
+  <script src="/static/js/customer_statement_email_wizard.js"></script>
+
+</div>
+{% endblock %}

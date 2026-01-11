@@ -1,0 +1,838 @@
+/* =====================================================================================
+   /schedule page styles
+   Sections:
+   1. Statement plan (2-column grid: label left, controls right)
+   2. Exclusions UI (popover + modal)
+   3. Chasing block ("Simple scheduling" + manual send)
+   4. Email activity table
+   5. Responsive tweaks
+   ===================================================================================== */
+
+
+/* ---------------------------
+   STATEMENTS LAYOUT
+--------------------------- */
+
+
+/* wrapper for all rows */
+.stmt-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  /* optional soft bg: #fff is fine to match the page */
+}
+
+/* each row = 2-column grid:
+   left = label
+   right = controls */
+.stmt-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0,1fr);
+  column-gap: 16px;
+  row-gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  align-items: flex-start;
+  background: transparent;
+}
+
+.stmt-row--noborder {
+  border-bottom: 0;
+  border-radius: 0 0 10px 10px;
+}
+
+/* left column */
+.stmt-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* info bubble */
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 999px;
+  background: var(--brand-100);
+  color: var(--brand-700);
+  border: 1px solid var(--brand-500);
+  font-weight: 600;
+  cursor: help;
+}
+
+/* right column */
+.stmt-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* helper text under a control */
+.stmt-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* ---------------------------
+   Toggle (On/Off)
+--------------------------- */
+
+#g_plan_enabled {
+  display: none; /* JS will hide it anyway */
+}
+
+/* --- ON/OFF pill toggle sizing + layout --- */
+
+.yn-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  /* bigger so "On" / "Off" fits */
+  width: 74px;
+  height: 32px;
+  border-radius: 999px;
+
+  background: #d1d5db;         /* off state bg */
+  cursor: pointer;
+  user-select: none;
+
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+
+  padding: 0;                  /* we'll position text ourselves */
+  transition: background .15s;
+}
+
+.yn-toggle.is-on {
+  background: #059669;         /* green when ON */
+}
+
+/* the white knob */
+.yn-toggle__knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,.2);
+
+  transition: left .15s;
+}
+
+/* when ON, slide knob to the right */
+.yn-toggle.is-on .yn-toggle__knob {
+  left: 46px; /* 74 - 24 - 4 = 46 */
+}
+
+/* the "On"/"Off" text */
+.yn-toggle__text {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+  pointer-events: none;
+
+  /* center text in the pill, not inside the knob */
+  text-align: center;
+  width: 100%;
+}
+
+
+/* ---------------------------
+   Frequency (Weekly / Monthly)
+--------------------------- */
+
+.freq-toggle {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1.2;
+  user-select: none;
+  cursor: pointer;
+  max-width: 100%;
+  background: #fff;
+}
+
+.freq-toggle__track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.freq-toggle__opt {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* highlight active side */
+.freq-toggle.is-weekly  .freq-toggle__opt[data-val="weekly"],
+.freq-toggle.is-monthly .freq-toggle__opt[data-val="monthly"] {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.15);
+}
+
+/* Day of week / Day of month area */
+.freq-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.freq-detail__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.mini-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Selects / numeric input */
+.freq-detail__row select,
+.freq-detail__row input[type="number"] {
+  min-width: 100px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+.freq-detail__row input[type="number"] {
+  width: 4rem;
+  text-align: center;
+}
+
+/* ---------------------------
+   Send time (hour picker)
+--------------------------- */
+
+.inline-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.inline-control select {
+  min-width: 100px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+/* ---------------------------
+   Customers row
+--------------------------- */
+
+.stmt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.stmt-actions .btn,
+.stmt-actions .btn:visited {
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--brand-700);
+  cursor: pointer;
+}
+
+.stmt-actions .btn.btn--ghost:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+}
+
+/* summary text under customers button */
+#g_week_excl_sum,
+#g_month_excl_sum {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ---------------------------
+   Update schedule button
+--------------------------- */
+
+#g_schedule_save,
+#g_schedule_save:visited {
+  display: inline-block;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  height: 32px;
+  padding: 6px 10px;
+  cursor: pointer;
+  background: var(--brand-600);
+  border: 1px solid var(--brand-600);
+  color: #fff;
+  font-weight: 500;
+  width: fit-content;
+}
+#g_schedule_save:hover {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+}
+
+/* ---------------------------
+   Mobile
+--------------------------- */
+
+@media (max-width: 600px) {
+  .stmt-row {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+  }
+
+  .stmt-label {
+    font-size: 14px;
+  }
+
+  .stmt-control {
+    width: 100%;
+  }
+
+  .freq-toggle__track {
+    justify-content: flex-start;
+  }
+
+  .stmt-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* helper tooltip wrapper */
+.help-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
+.help-tooltip {
+  position: absolute;
+  z-index: 9999;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  max-width: 320px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0,0,0,.12);
+  white-space: normal;
+  display: none;
+}
+
+/* show tooltip on hover OR keyboard focus */
+.help-wrapper:hover .help-tooltip,
+.help-wrapper:focus-within .help-tooltip {
+  display: block;
+}
+
+
+/* =====================================================================================
+   2. EXCLUSIONS UI
+   -------------------------------------------------------------------------------------
+   2a. Floating popover (All customers…)
+   2b. Full-screen modal (Manage exclusions)
+   ===================================================================================== */
+
+/* ----- 2a. Inline popover ----- */
+
+.excl-popover {
+  position: absolute;
+  z-index: 9999;
+  width: 360px;
+  max-height: 400px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+}
+
+.excl-popover__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.excl-popover__head .title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.excl-popover__search {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+
+.excl-popover__body {
+  flex: 1;
+  min-height: 120px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 8px;
+  background: #fafafa;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.excl-popover__list .excl-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  line-height: 1.4;
+  font-size: 13px;
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.excl-item__left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.excl-item__right {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.excl-popover__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.excl-popover__summary {
+  white-space: nowrap;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+
+/* ----- 2b. Full-screen exclusions modal ----- */
+
+.modal[hidden] {
+  display: none !important;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,.55);
+  z-index: 1000;
+}
+
+.modal__dialog {
+  background: #fff;
+  width: min(800px,92vw);
+  border-radius: 12px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.30);
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.modal__head {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e7e7ea;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal__body {
+  padding: 14px 16px;
+}
+
+.modal__foot {
+  padding: 12px 16px;
+  border-top: 1px solid #e7e7ea;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.list {
+  display: grid;
+  gap: 6px;
+}
+
+.excl-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid #e7e7ea;
+  border-radius: 8px;
+}
+
+.excl-item__left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.excl-item__right {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+
+/* =====================================================================================
+   3. CHASING SECTION
+   -------------------------------------------------------------------------------------
+   We keep your chasing layout (row-form.row-form--schedule)
+   ===================================================================================== */
+
+.row-form.row-form--schedule {
+  display: grid;
+  grid-template-columns: 220px 200px 220px 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row-form.row-form--schedule .field--inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.row-form.row-form--schedule .field--inline label {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.row-form.row-form--schedule .field--inline select {
+  min-width: 120px;
+  height: 28px;
+  padding: 2px 6px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+}
+
+.actions--end {
+  align-self: end;
+  justify-self: end;
+  text-align: right;
+}
+
+.actions--end .muted {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.row-form.row-form--schedule .btn,
+.row-form.row-form--schedule .btn:visited {
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 8px;
+  height: 30px;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #111827;
+}
+
+.row-form.row-form--schedule .btn.primary,
+.row-form.row-form--schedule .btn.btn--primary {
+  background: var(--brand-600);
+  color: #fff;
+  border-color: var(--brand-600);
+}
+
+.row-form.row-form--schedule .btn.btn--ghost {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--brand-700);
+}
+
+.row-form.row-form--schedule .btn.btn--ghost:hover {
+  background: var(--brand-100);
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+}
+
+
+/* each row inside the chasing card */
+.chasing-card .stmt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chasing-card .stmt-row:last-child {
+  border-bottom: 0;
+}
+
+/* the left label column ("Send invoice reminders automatically", etc.) */
+.chasing-card .stmt-label {
+  min-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* right side (controls) */
+.chasing-card .stmt-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* don't let selects stretch full width */
+.chasing-card .stmt-control select {
+  max-width: 260px;
+  width: auto;
+  min-width: 140px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+/* same for the toggle + the "All customers…" button */
+.chasing-card .stmt-control .yn-toggle,
+.chasing-card .stmt-control .btn {
+  max-width: 260px;
+  width: auto;
+}
+
+/* Save button ("Update chasing" / "Saved ✓") */
+#ch_save,
+#ch_save:visited {
+  display: inline-block;
+  width: auto;
+  max-width: none;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  height: 32px;
+  padding: 6px 10px;
+  cursor: pointer;
+  background: var(--brand-600);
+  border: 1px solid var(--brand-600);
+  color: #fff;
+  font-weight: 500;
+}
+#ch_save:hover {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+}
+
+/* mobile: stack label on top of control for each row */
+@media (max-width: 600px) {
+  .chasing-card .stmt-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .chasing-card .stmt-label {
+    min-width: 0;
+  }
+}
+
+
+
+/* =====================================================================================
+   4. EMAIL ACTIVITY TABLE + misc helpers
+   ===================================================================================== */
+
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.table-mini {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table-mini th,
+.table-mini td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d7d7dc;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.flatpickr-calendar { z-index: 100000 !important; }
+dialog .flatpickr-calendar { position: fixed !important; }
+
+
+/* =====================================================================================
+   5. RESPONSIVE TWEAKS
+   -------------------------------------------------------------------------------------
+   On narrow screens:
+   - statement rows stack (label on top, controls under)
+   - chasing grid becomes vertical
+   ===================================================================================== */
+
+@media (max-width: 600px) {
+
+  /* statement rows become vertical */
+  .plan-row { grid-template-columns: 1fr; row-gap: 8px; }
+  .plan-row .row-head,
+  .plan-label__title,
+  .stmt-label,
+  .plan-field,
+  .plan-hint,
+  .stmt-actions { grid-column: 1; }
+
+  .plan-label__title {
+    font-size: 14px;
+  }
+
+  .plan-field {
+    width: 100%;
+  }
+
+  .sched-line {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .inline-control {
+    width: 100%;
+  }
+
+  .stmt-actions {
+    width: 100%;
+  }
+
+  /* chasing collapses into a column */
+  .row-form.row-form--schedule {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .actions--end {
+    align-self: flex-start;
+    justify-self: flex-start;
+    text-align: left;
+  }
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Create account · Invoice Chaser</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/css/auth.css">
+  <style>
+    body { margin:0; background:#f7f8fb; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    .wrap { min-height:100vh; display:grid; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 900px) { .wrap { grid-template-columns:1fr; } .side { display:none; } }
+    .card-wrap { display:flex; align-items:center; justify-content:center; padding:40px; }
+    .card { width:100%; max-width:460px; background:#fff; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.06); padding:24px; }
+    h1 { margin:0 0 10px; }
+    .field { margin:12px 0; }
+    .field span { display:block; font-size:14px; color:#334155; margin-bottom:6px; }
+    input[type="email"], input[type="password"] { width:100%; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; }
+    .btn { display:inline-block; padding:10px 14px; border-radius:8px; text-decoration:none; text-align:center; }
+    .btn--primary { background:#5865f2; color:#fff; width:100%; }
+    .alert { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; border-radius:8px; padding:8px 10px; margin:8px 0 4px; }
+    .muted { color:#64748b; }
+    .small { font-size:13px; }
+    .side { background:#eef2ff; display:flex; align-items:center; justify-content:center; padding:40px; }
+    .side-inner { max-width:520px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card-wrap">
+      <div class="card">
+        <h1>Create your account</h1>
+        {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+        <form method="post" action="/auth/register" novalidate>
+          <input type="hidden" name="next" value="{{ next or '/dashboard' }}">
+          <label class="field">
+            <span>Email address</span>
+            <input type="email" name="email" autocomplete="username" required>
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input type="password" name="password" autocomplete="new-password" required>
+          </label>
+          <label class="field">
+            <span>Confirm password</span>
+            <input type="password" name="confirm_password" autocomplete="new-password" required>
+          </label>
+          <button class="btn btn--primary" type="submit">Create account</button>
+          <p class="muted small" style="margin-top:10px;">Already have an account? <a href="/auth/login?next={{ next or '/dashboard' }}">Log in</a></p>
+        </form>
+      </div>
+    </div>
+    <div class="side">
+      <div class="side-inner">
+        <h2>Why join?</h2>
+        <p>Automated invoice chasing, statements, and clearer cash flow.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

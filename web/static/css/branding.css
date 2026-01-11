@@ -1,0 +1,68 @@
+/* Branding palettes: override CSS variables via [data-theme] on <html> */
+
+/* Defaults are defined in app.css :root. Themes below only override brand accents. */
+
+[data-theme="teal"]{
+  --brand-700:#0f766e;
+  --brand-600:#14b8a6;
+  --brand-200:#a7f3d0;
+  --brand-100:#ccfbf1;
+  --link:var(--brand-600);
+}
+
+[data-theme="indigo"]{
+  --brand-700:#4f46e5;
+  --brand-600:#6366f1;
+  --brand-200:#dbe5ff;
+  --brand-100:#eef2ff;
+  --link:var(--brand-600);
+}
+
+[data-theme="purple"]{
+  --brand-700:#7c3aed;
+  --brand-600:#8b5cf6;
+  --brand-200:#e9d5ff;
+  --brand-100:#f3e8ff;
+  --link:var(--brand-600);
+}
+
+[data-theme="blue"]{
+  --brand-700:#1d4ed8;
+  --brand-600:#2563eb;
+  --brand-200:#bfdbfe;
+  --brand-100:#dbeafe;
+  --link:var(--brand-600);
+}
+
+[data-theme="orange"]{
+  --brand-700:#c2410c;
+  --brand-600:#ea580c;
+  --brand-200:#fed7aa;
+  --brand-100:#ffedd5;
+  --link:var(--brand-700);
+}
+
+[data-theme="rose"]{
+  --brand-700:#be123c;
+  --brand-600:#e11d48;
+  --brand-200:#fecdd3;
+  --brand-100:#ffe4e6;
+  --link:var(--brand-600);
+}
+
+[data-theme="emerald"]{
+  --brand-700:#047857;
+  --brand-600:#10b981;
+  --brand-200:#a7f3d0;
+  --brand-100:#d1fae5;
+  --link:var(--brand-700);
+}
+
+[data-theme="slate"]{
+  --brand-700:#0f172a;
+  --brand-600:#334155;
+  --brand-200:#cbd5e1;
+  --brand-100:#e2e8f0;
+  --link:var(--brand-700);
+}
+

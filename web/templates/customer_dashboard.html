@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% set title = customer.name ~ " · Customer Dashboard" %}
+{% set active = "dashboard" %}
+{% from "page_components/actions_bar.html" import actions_bar %}
+{% block content %}
+
+<!-- Boot data for JS -->
+<div id="cust-boot" data-id="{{ customer.id }}" data-name="{{ customer.name|e }}" hidden></div>
+
+{{ actions_bar(
+  customer.name,
+  actions=[ {'id':'btn_edit_customer','label':'Edit customer','variant':'btn--ghost'} ],
+  sections=[
+    { 'label':'New action','variant':'btn','items':[
+        {'id':'btn_add_invoice','label':'Add invoice'},
+        {'id':'btn_add_invoice_bulk','label':'Add invoices in bulk'},
+        {'id':'btn_add_payment','label':'Add customer payment'}
+    ]},
+    { 'label':'Reminders','variant':'btn--ghost','items':[
+        {'id':'btn_send_statement','label':'Send statement email'},
+        {'id':'btn_send_sms','label':'Send chasing SMS'}
+    ]},
+    { 'label':'Statement','variant':'btn--ghost','items':[
+        {'id':'btn_view_statement','label':'View statement',
+         'href':'/customers/' ~ customer.id ~ '/statement','target':'_blank'}
+    ]},
+    { 'label':'Customer','variant':'btn--ghost','items':[
+        {'id':'btn_automation_settings','label':'Automation settings'},
+        'sep',
+        {'id':'btn_export_csv','label':'Export CSV'},
+        {'id':'btn_archive_customer','label':'Archive customer'}
+    ]}
+  ],
+  align='center'
+) }}
+
+<!-- Modals on this page -->
+{% include "customer_payments_wizard.html" %}
+{% include "customer_editor.html" %}
+
+<!-- Reuse invoice wizards -->
+{% include "invoices_manual_upload.html" %}
+{% include "invoices_upload_wizard.html" %}
+
+<!-- ===========================
+     Balance & aging (moved up; replaces KPI strip)
+     =========================== -->
+<section class="panel" style="margin-top:12px;">
+  <div class="panel__head">
+    <h2>Balance & aging</h2>
+    <div></div>
+  </div>
+  <div style="padding:12px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th style="text-align:right;">Total owed</th>
+          <th style="text-align:right;">Total due now</th>
+          <th style="text-align:right;">0–30 overdue</th>
+          <th style="text-align:right;">31–60 overdue</th>
+          <th style="text-align:right;">61–90 overdue</th>
+          <th style="text-align:right;">90+ overdue</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="cust_aging_row">
+          <td id="cust_name">{{ customer.name }}</td>
+          <td style="text-align:right;" id="cust_tot_owed">£0.00</td>
+          <td style="text-align:right;color:#b42318;font-weight:600;" id="cust_due_now">£0.00</td>
+          <td style="text-align:right;" id="cust_b0">£0.00</td>
+          <td style="text-align:right;" id="cust_b31">£0.00</td>
+          <td style="text-align:right;" id="cust_b61">£0.00</td>
+          <td style="text-align:right;" id="cust_b90">£0.00</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===========================
+     Weekly performance (same IDs as main dashboard; driven by dashboard.js)
+     =========================== -->
+<section class="panel" style="margin-top:12px;">
+  <div class="panel__head" style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;">
+    <h2 style="margin-right:auto;">Last 26 weeks</h2>
+
+    <!-- metric switch -->
+    <div class="chipbar" style="display:flex;gap:6px;">
+      <button class="chip is-active" id="wk_btn_issued">Issued (Invoices − Credits)</button>
+      <button class="chip" id="wk_btn_received">Received (Cash in)</button>
+    </div>
+
+    <!-- weeks controls -->
+    <div class="row" style="display:flex; gap:8px; align-items:center;">
+      <div id="wk_quick" class="btnset" style="display:flex;gap:6px;">
+        <button class="btn btn--ghost" data-wk="1">1w</button>
+        <button class="btn btn--ghost" data-wk="4">4w</button>
+        <button class="btn btn--ghost" data-wk="12">12w</button>
+        <button class="btn btn--ghost is-active" data-wk="26">26w</button>
+        <button class="btn btn--ghost" data-wk="52">52w</button>
+      </div>
+      <label class="muted" for="wk_input">or weeks</label>
+      <input id="wk_input" type="number" min="1" max="104" step="1" value="26" style="width:80px;">
+      <label class="muted" style="display:flex;align-items:center;gap:6px;margin-left:10px;">
+        <!-- default unchecked to hide the line -->
+        <input id="wk_toggle_cnt" type="checkbox">
+        Show invoice count
+      </label>
+    </div>
+  </div>
+
+  <div style="padding:12px;">
+    <div id="wk_chart" class="chart" style="width:100%;height:300px;position:relative;"></div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:12px;">
+      <div class="kpi"><div class="kpi__label">Period total</div><div class="kpi__value" id="wk_total">£0.00</div></div>
+      <div class="kpi"><div class="kpi__label">Avg invoice amount</div><div class="kpi__value" id="wk_avg_inv">—</div></div>
+      <div class="kpi"><div class="kpi__label">Avg invoices / week</div><div class="kpi__value" id="wk_avg_cnt">—</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===========================
+     Transactions
+     =========================== -->
+<section class="panel" style="margin-top:12px;">
+  <div class="panel__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <h2>Transactions</h2>
+    <nav id="txn_filters" class="tabbar" style="margin:0;">
+      <button class="tab is-active" data-filter="all">All</button>
+      <button class="tab" data-filter="invoice">Invoices</button>
+      <button class="tab" data-filter="payment">Payments</button>
+    </nav>
+  </div>
+
+  <div class="toolbar" style="display:flex;align-items:center;gap:12px;padding:0 12px 8px 12px;">
+    <label class="muted" for="txn_per">Show</label>
+    <select id="txn_per" style="min-width:72px;">
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
+      <option value="100">100</option>
+    </select>
+    <span class="muted">rows</span>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <button id="txn_prev" class="btn btn--ghost" type="button">Prev</button>
+      <span id="txn_page_info" class="muted">Page 1 / 1 (0 items)</span>
+      <button id="txn_next" class="btn btn--ghost" type="button">Next</button>
+    </div>
+  </div>
+
+  <div style="padding:12px;">
+    <table id="txn_table">
+      <thead>
+        <tr>
+          <th style="width:120px;">Date</th>
+          <th style="width:110px;">Ref</th>
+          <th>Description</th>
+          <th style="text-align:right;width:140px;">Debit</th>
+          <th style="text-align:right;width:140px;">Credit</th>
+          <th style="text-align:right;width:160px;">Balance</th>
+        </tr>
+      </thead>
+      <tbody id="txn_rows"></tbody>
+    </table>
+    <div id="txn_empty" class="empty" style="display:none;">No transactions to show.</div>
+    <p class="muted" style="margin-top:8px;"></p>
+  </div>
+</section>
+
+<!-- JS -->
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/customer_dashboard.js"></script>
+<script src="/static/js/customer_payments_wizard.js"></script>
+<script src="/static/js/customer_editor.js"></script>
+
+<!-- Reused invoice wizard JS -->
+<script src="/static/js/invoices.js"></script>
+<script src="/static/js/invoices_manual_upload.js"></script>
+<script src="/static/js/invoices_upload_wizard.js"></script>
+
+<!-- Wire the action buttons with this customer preselected (unchanged) -->
+<script>
+(() => {
+  const boot = document.getElementById('cust-boot');
+  const custId   = Number(boot?.dataset.id || 0);
+  const custName = boot?.dataset.name || '';
+
+  async function fetchCustomerBasics(id){
+    try {
+      const r = await fetch('/api/customers/' + id, {cache:'no-store'});
+      if (!r.ok) throw new Error(String(r.status));
+      return await r.json();
+    } catch {
+      return { id, name: custName, terms_type: 'net_30', terms_days: null };
+    }
+  }
+
+  function ensureManualWizardLoaded(){
+    const dlg = document.getElementById('manual_wizard');
+    if (!dlg) { alert('Manual wizard HTML not found (missing <dialog id="manual_wizard">).'); return false; }
+    if (typeof window.openManualWizard !== 'function') {
+      alert('Manual invoice wizard JS is not loaded.');
+      return false;
+    }
+    return true;
+  }
+
+  function ensureUploadWizardLoaded(){
+    const dlg = document.getElementById('upload_wizard');
+    if (!dlg) { alert('Upload wizard HTML not found (missing <dialog id="upload_wizard">).'); return false; }
+    if (typeof window.openWizard !== 'function') {
+      alert('Upload wizard JS is not loaded.');
+      return false;
+    }
+    return true;
+  }
+
+  document.addEventListener('click', async (ev) => {
+    const addManualBtn = ev.target.closest('#btn_add_invoice');
+    const addBulkBtn   = ev.target.closest('#btn_add_invoice_bulk');
+    const addPayBtn    = ev.target.closest('#btn_add_payment');
+
+    if (addManualBtn) {
+      ev.preventDefault();
+      if (!ensureManualWizardLoaded()) return;
+      const c = await fetchCustomerBasics(custId);
+      window.openManualWizard({ step: 2, customer: c, lockCustomer: true });
+      return;
+    }
+
+    if (addBulkBtn) {
+      ev.preventDefault();
+      if (!ensureUploadWizardLoaded()) return;
+      const c = await fetchCustomerBasics(custId);
+      window.openWizard({ customer: c, lockCustomer: true });
+      return;
+    }
+
+    if (addPayBtn) {
+      ev.preventDefault();
+      if (typeof window.openCustomerPaymentWizard === 'function') {
+        window.openCustomerPaymentWizard(custId, custName);
+      }
+      return;
+    }
+  });
+})();
+</script>
+{% endblock %}

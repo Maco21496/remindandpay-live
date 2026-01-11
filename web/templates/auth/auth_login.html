@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Log in · Invoice Chaser</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/css/auth.css">
+  <style>
+    /* minimal safety if auth.css is thin */
+    body { margin:0; background:#f7f8fb; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    .auth-wrap { min-height:100vh; display:grid; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 900px) { .auth-wrap { grid-template-columns: 1fr; } .auth-side { display:none; } }
+    .auth-card { display:flex; align-items:center; justify-content:center; padding:40px; }
+    .auth-card .card { width:100%; max-width:420px; background:#fff; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.06); padding:24px; }
+    .brand { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+    .brand .logo { height:28px; }
+    .auth-form .field { display:block; margin:12px 0; }
+    .auth-form .field > span { display:block; font-size:14px; color:#334155; margin-bottom:6px; }
+    .auth-form input[type="email"],
+    .auth-form input[type="password"] { width:100%; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; }
+    .chk { display:flex; align-items:center; gap:8px; margin:8px 0 14px; font-size:14px; color:#334155; }
+    .btn { display:inline-block; padding:10px 14px; border-radius:8px; text-decoration:none; text-align:center; }
+    .btn--primary { background:#5865f2; color:#fff; width:100%; }
+    .alert { background:#fee2e2; color:#991b1b; border:1px solid #fecaca; border-radius:8px; padding:8px 10px; margin:8px 0 4px; }
+    .muted { color:#64748b; }
+    .small { font-size:13px; }
+    .auth-side { background:#eef2ff; display:flex; align-items:center; justify-content:center; padding:40px; }
+    .auth-side-inner { max-width:520px; }
+    .auth-side h2 { font-size:28px; margin:0 0 10px; }
+    .auth-side p { font-size:16px; color:#334155; margin:0 0 12px; }
+    .auth-side .bullet { margin:8px 0; color:#475569; }
+  </style>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="card">
+        <div class="brand">
+          <img src="/static/img/logo.svg" alt="Logo" class="logo" onerror="this.style.display='none'">
+          <h1>Invoice Chaser</h1>
+        </div>
+
+        <form method="post" action="/auth/login" class="auth-form" novalidate>
+          {% if error %}
+            <div class="alert">{{ error }}</div>
+          {% endif %}
+
+          <input type="hidden" name="next" value="{{ next or '/dashboard' }}">
+
+          <label class="field">
+            <span>Email address</span>
+            <input type="email" name="email" autocomplete="username" required>
+          </label>
+
+          <label class="field">
+            <span>Password</span>
+            <input type="password" name="password" autocomplete="current-password" required>
+          </label>
+
+          <label class="chk">
+            <input type="checkbox" name="remember">
+            <span>Keep me logged in</span>
+          </label>
+
+          <button class="btn btn--primary" type="submit">Log in now</button>
+
+          <div class="muted small" style="margin-top:10px;">
+            <a href="#" onclick="alert('Forgot password flow not built yet'); return false;">Forgot your password?</a>
+          </div>
+
+          <div class="muted small" style="margin-top:10px;">
+            New here?
+            <a href="/auth/register?next={{ next or '/dashboard' }}">Create an account</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="auth-side">
+      <div class="auth-side-inner">
+        <h2>Chase invoices the easy way</h2>
+        <p>Automated reminders, statements and payment tracking.</p>
+        <p class="bullet">• Reduce late payments with smart nudges</p>
+        <p class="bullet">• Send statements in one click</p>
+        <p class="bullet">• Track promises to pay</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

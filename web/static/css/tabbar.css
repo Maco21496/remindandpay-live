@@ -1,0 +1,52 @@
+/* Customer/project tab chips under the header */
+.tabbar{
+  display:flex; gap:6px; align-items:center; margin:6px 0
+}
+
+.tabbar .tab,
+.tabbar a.tab{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 12px;
+  border:1px solid var(--brand-200);
+  border-radius:999px;
+  background:#fff;
+  color:#111827; text-decoration:none;
+  box-shadow:0 1px 0 rgba(17,17,26,.03);
+}
+
+/* Ensure link tabs default to dark text even after visit */
+.tabbar a.tab,
+.tabbar a.tab:visited{
+  color:#111827;
+}
+
+.tabbar .tab:hover,
+.tabbar a.tab:hover{
+  background:var(--brand-100);
+}
+
+/* Active/pressed/focused tab = white text on brand background */
+.tabbar .tab.is-active,
+.tabbar a.tab.is-active,
+.tabbar .tab:active,
+.tabbar a.tab:active,
+.tabbar .tab:focus,
+.tabbar a.tab:focus{
+  color:#fff;
+  background:var(--brand-600);
+  border-color:var(--brand-600);
+  outline:none;
+}
+
+/* Make inner elements (like the ×) inherit white */
+.tabbar .tab.is-active *,
+.tabbar a.tab.is-active *{
+  color:inherit;
+}
+
+.tabbar .tab__close{
+  border:0; background:transparent; cursor:pointer;
+  font-size:14px; line-height:1; color:inherit; opacity:.85
+}
+.tabbar .tab__close:hover{ opacity:1 }
+

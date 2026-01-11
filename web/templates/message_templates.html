@@ -1,0 +1,293 @@
+<!-- FINAL VERSION OF templates/message_templates.html -->
+{% extends "base.html" %}
+{% set title = "Messaging" %}
+{% set active = "message_templates" %}
+{% block content %}
+
+<link rel="stylesheet" href="/static/css/message_cycles.css">
+<link rel="stylesheet" href="/static/css/message_templates.css">
+
+<section class="panel">
+  <div class="panel__head">
+    <h2>Messaging</h2>
+    <p class="muted">
+      Write the messages you send to chase overdue invoices, and organise when they go out.
+    </p>
+  </div>
+
+  <!-- TAB BAR -->
+  <div class="tabbar" style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:8px;">
+    <a href="#plans" id="tab_cycles" class="chip">Chasing plans</a>
+    <a href="#templates" id="tab_templates" class="chip chip--active">Message templates</a>
+  </div>
+
+  <!-- ===================== PLANS TAB ===================== -->
+  <section id="cycles_view" style="display:none;">
+    <div class="mc-layout">
+      <aside class="mc-sidebar">
+        <div class="mc-sidebar-head">
+          <div class="mc-sidebar-head-top">Your chasing plans</div>
+          <div class="mc-sidebar-head-sub">Each plan is a set of triggers.</div>
+        </div>
+
+        <div class="mc-sidebar-actions">
+          <button id="cycle_new_btn" class="mc-btn mc-btn--primary mc-btn--sm">New plan</button>
+          <button id="cycle_delete_btn" class="mc-btn mc-btn--ghost mc-btn--danger mc-btn--sm" disabled>Delete</button>
+        </div>
+
+        <div id="cycle_list" class="mc-cycle-list"></div>
+      </aside>
+
+      <main class="mc-detail">
+        <div class="mc-detail-head">
+          <div class="mc-detail-head-main">
+            <div class="mc-detail-title" id="steps_cycle_name">No plan selected</div>
+            <div class="mc-detail-meta"  id="steps_cycle_desc">Select a plan on the left.</div>
+          </div>
+
+          <div class="mc-detail-head-actions">
+            <button id="step_add_btn" class="mc-btn mc-btn--primary mc-btn--sm" disabled>Add trigger</button>
+          </div>
+        </div>
+
+        <div id="steps_list" class="mc-steps-list"></div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ===================== TEMPLATES TAB ===================== -->
+  <section id="templates_view" style="display:block;">
+    <div class="card">
+      <div class="card__head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;">Message templates</h3>
+          <p class="muted" style="margin:4px 0 0;">Edit the messages you send to customers. You attach these to a chasing plan later.</p>
+        </div>
+
+        <details class="kebab">
+          <summary aria-label="Template actions">⋯</summary>
+          <div class="menu">
+            <button id="t_new" type="button">New template</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card__body">
+        <div class="filters" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <select id="t_tag" title="Tag">
+            <option value="">All tags</option>
+            <option value="gentle">Gentle</option>
+            <option value="firm">Firm</option>
+            <option value="aggressive">Aggressive</option>
+            <option value="custom">Custom</option>
+          </select>
+
+          <select id="t_active" title="Status">
+            <option value="1" selected>Active</option>
+            <option value="">All</option>
+            <option value="0">Archived</option>
+          </select>
+
+          <input id="t_search" class="input" placeholder="Search name, key, subject…" style="min-width:220px;">
+        </div>
+
+        <table class="msg-table">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Tone / label</th>
+              <th style="text-align:left;">Status</th>
+              <th style="text-align:left;">Last updated</th>
+              <th style="text-align:right;"></th>
+            </tr>
+          </thead>
+          <tbody id="t_rows"></tbody>
+        </table>
+
+        <div id="t_empty" class="empty" style="display:none;">No templates.</div>
+      </div>
+    </div>
+
+    <div id="t_editor" class="card" style="display:none; margin-top:14px;"></div>
+  </section>
+</section>
+
+<!-- ===== MODALS FOR THE PLANS TAB ===== -->
+<div id="modal_add_step" class="mc-modal hidden">
+  <div class="mc-modal__box">
+    <div class="mc-modal__head">
+      <div class="mc-modal__title">Add trigger to plan</div>
+      <button class="mc-modal__close" data-close-add>✕</button>
+    </div>
+    <div class="mc-modal__body">
+      <div class="mc-field">
+        <label class="mc-label">Send on day overdue</label>
+        <input id="add_offset_days" class="mc-input" type="number" min="0" step="1" />
+        <div class="mc-hint">Example: 14 means “send when oldest unpaid invoice is 14+ days overdue”.</div>
+      </div>
+      <div class="mc-field">
+        <label class="mc-label">Template</label>
+        <select id="add_template_key" class="mc-input"></select>
+        <div class="mc-hint">Only active email templates are listed.</div>
+      </div>
+      <div id="add_error" class="mc-error hidden"></div>
+    </div>
+    <div class="mc-modal__foot">
+      <button id="add_step_save" class="mc-btn mc-btn--primary mc-btn--sm">Add trigger</button>
+      <button class="mc-btn mc-btn--ghost mc-btn--sm" data-close-add>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal_edit_step" class="mc-modal hidden">
+  <div class="mc-modal__box">
+    <div class="mc-modal__head">
+      <div class="mc-modal__title">Replace trigger message</div>
+      <button class="mc-modal__close" data-close-edit>✕</button>
+    </div>
+    <div class="mc-modal__body">
+      <div class="mc-field">
+        <label class="mc-label">Send on day overdue</label>
+        <input id="edit_offset_days" class="mc-input" type="number" min="0" step="1" />
+        <div class="mc-hint">Change only if this should trigger on a different overdue day.</div>
+      </div>
+      <div class="mc-field">
+        <label class="mc-label">Template</label>
+        <select id="edit_template_key" class="mc-input"></select>
+        <div class="mc-hint">Pick a different template for this trigger.</div>
+      </div>
+      <div id="edit_error" class="mc-error hidden"></div>
+    </div>
+    <div class="mc-modal__foot">
+      <button id="edit_step_save" class="mc-btn mc-btn--primary mc-btn--sm">Save changes</button>
+      <button class="mc-btn mc-btn--ghost mc-btn--sm" data-close-edit>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TEMPLATE WIZARD (div modal; hidden by default) ===== -->
+<div id="tmpl_wizard" class="mc-modal hidden" role="dialog" aria-modal="true" aria-labelledby="tw_title">
+  <div class="mc-modal__box" style="max-width:880px;">
+    <div class="mc-modal__head">
+      <div id="tw_title" class="mc-modal__title">New message template</div>
+      <button class="mc-modal__close" id="tw_close">✕</button>
+    </div>
+
+    <div class="mc-modal__body">
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <div id="tw_st1" class="mc-stepper">1. Basics</div>
+        <div id="tw_st2" class="mc-stepper">2. Content</div>
+      </div>
+      <div id="tw_body"></div>
+
+      <!-- step templates -->
+      <template id="tpl_tw_step1">
+        <div class="mc-field">
+          <label class="mc-label">Tone / tag</label>
+          <select id="tw_tag" class="mc-input">
+            <option value="gentle">Gentle</option>
+            <option value="firm">Firm</option>
+            <option value="aggressive">Aggressive</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+
+        <div class="mc-field">
+          <label class="mc-label">Label (friendly name)</label>
+          <input id="tw_name" class="mc-input" maxlength="120" placeholder="e.g. Gentle — First reminder">
+        </div>
+
+        <div class="mc-field">
+          <label class="mc-label">Channel</label>
+          <select id="tw_channel" class="mc-input">
+            <option value="email" selected>Email</option>
+            <option value="sms">SMS</option>
+          </select>
+        </div>
+
+        <div class="mc-field">
+          <label class="mc-label">Status</label>
+          <select id="tw_active" class="mc-input">
+            <option value="1" selected>Active (can be used)</option>
+            <option value="0">Archived (hidden)</option>
+          </select>
+        </div>
+      </template>
+
+      <template id="tpl_tw_step2">
+        <div class="mc-field">
+          <label class="mc-label">Subject (email only)</label>
+          <input id="tw_subject" class="mc-input" maxlength="255" placeholder="Subject">
+        </div>
+
+        <div class="mc-field">
+          <label class="mc-label">Body (text)</label>
+          <textarea id="tw_body_text" class="mc-input" rows="5" placeholder="Plain text…"></textarea>
+        </div>
+
+        <div class="mc-field">
+          <details>
+            <summary class="mc-label" style="cursor:pointer;">Body (HTML — advanced)</summary>
+            <textarea id="tw_body_html" class="mc-input" rows="6" placeholder="<p>HTML…</p>"></textarea>
+            <div class="muted" style="margin-top:4px;">
+              If HTML is present, it will be sent instead of the text body.
+            </div>
+          </details>
+        </div>
+
+        <div id="tw_err" class="mc-error hidden"></div>
+      </template>
+    </div>
+
+    <div class="mc-modal__foot">
+      <button id="tw_back" class="mc-btn mc-btn--ghost mc-btn--sm">Back</button>
+      <button id="tw_next" class="mc-btn mc-btn--primary mc-btn--sm">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- TAB SWITCHER -->
+<script>
+(function () {
+  const tabCycles     = document.getElementById('tab_cycles');
+  const tabTemplates  = document.getElementById('tab_templates');
+  const viewCycles    = document.getElementById('cycles_view');
+  const viewTemplates = document.getElementById('templates_view');
+
+  function activate(which) {
+    if (which === 'templates') {
+      tabTemplates.classList.add('chip--active');
+      tabCycles.classList.remove('chip--active');
+      viewTemplates.style.display = 'block';
+      viewCycles.style.display = 'none';
+      window.dispatchEvent(new Event('templates_tab_activated'));
+    } else {
+      tabCycles.classList.add('chip--active');
+      tabTemplates.classList.remove('chip--active');
+      viewCycles.style.display = 'block';
+      viewTemplates.style.display = 'none';
+      window.dispatchEvent(new Event('cycles_tab_activated'));
+    }
+  }
+
+  tabCycles?.addEventListener('click', (e) => {
+    e.preventDefault();
+    activate('plans');
+    history.replaceState(null, '', '#plans');
+  });
+
+  tabTemplates?.addEventListener('click', (e) => {
+    e.preventDefault();
+    activate('templates');
+    history.replaceState(null, '', '#templates');
+  });
+
+  if (location.hash === '#templates') { activate('templates'); } else { activate('plans'); }
+})();
+</script>
+
+<!-- PAGE LOGIC SCRIPTS -->
+<script src="/static/js/message_cycles.js"></script>
+<script src="/static/js/message_templates.js"></script>
+<script src="/static/js/message_template_wizard.js"></script>
+
+{% endblock %}

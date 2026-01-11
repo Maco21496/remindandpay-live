@@ -1,0 +1,83 @@
+<!-- FINAL VERSION OF templates/admin/admin_users.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Admin – Users</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin: 0; padding: 16px; background:#f9fafb; }
+    h1 { margin-top: 0; }
+    table { border-collapse: collapse; width: 100%; background:#fff; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+    th { text-align: left; background:#f3f4f6; }
+    .tag { display:inline-block; padding:2px 6px; border-radius:999px; font-size:11px; }
+    .tag-active { background:#dcfce7; color:#166534; }
+    .tag-paused { background:#fee2e2; color:#991b1b; }
+    .btn { font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
+    .btn-danger { border-color:#ef4444; color:#b91c1c; }
+    .btn-small { font-size:11px; padding:3px 6px; }
+    .actions { display:flex; gap:4px; }
+    .owner-pill { font-size:12px; color:#4b5563; margin-bottom:12px; }
+  </style>
+</head>
+<body>
+  <h1>Admin – Users</h1>
+
+  <div class="owner-pill">
+    Signed in as: <strong>{{ owner_email }}</strong>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:60px;">ID</th>
+        <th>Email</th>
+        <th style="width:120px;">Created</th>
+        <th style="width:80px;">Status</th>
+        <th style="width:220px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>
+          {{ u.email }}
+          {% if (u.email or "").strip().lower() == "admin@remindandpay.com" %}
+            <span class="tag" style="background:#e0f2fe;color:#075985;margin-left:4px;">owner</span>
+          {% endif %}
+        </td>
+        <td>{{ u.created_at }}</td>
+        <td>
+          {% if u.is_active %}
+            <span class="tag tag-active">Active</span>
+          {% else %}
+            <span class="tag tag-paused">Paused</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="actions">
+            {% if u.is_active and (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+              <form method="post" action="/admin/users/{{ u.id }}/pause">
+                <button class="btn btn-small" type="submit">Pause</button>
+              </form>
+            {% elif (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+              <form method="post" action="/admin/users/{{ u.id }}/unpause">
+                <button class="btn btn-small" type="submit">Unpause</button>
+              </form>
+            {% endif %}
+
+            {% if (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+              <form method="post" action="/admin/users/{{ u.id }}/deactivate" onsubmit="return confirm('Deactivate this user? They will not be able to log in.');">
+                <button class="btn btn-small btn-danger" type="submit">Deactivate</button>
+              </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

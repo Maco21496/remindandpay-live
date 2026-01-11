@@ -1,0 +1,22 @@
+<dialog id="stm_wizard" class="modal">
+  <form method="dialog" class="modal__card" id="stm_form">
+    <header class="modal__head">
+      <h3>Email statement</h3>
+      <button type="submit" class="modal__close" aria-label="Close">✕</button>
+    </header>
+
+    <!-- Same stepper as payments wizard -->
+    <ol class="wizard_steps" id="stm_steps" style="margin:12px;">
+      <li class="is-active">1. Details</li>
+      <li>2. Preview</li>
+    </ol>
+
+    <section id="stm_body" class="wizard_body"></section>
+
+    <footer class="modal__foot">
+      <button type="button" id="stm_back" class="btn btn--ghost">Back</button>
+      <div style="flex:1"></div>
+      <button type="button" id="stm_next" class="btn">Next</button>
+    </footer>
+  </form>
+</dialog>

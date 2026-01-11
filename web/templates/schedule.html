@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+
+{% block head %}
+  {{ super() }}
+  <link href="/static/css/schedule.css?v=20251026" rel="stylesheet"/>
+{% endblock %}
+
+{% set title = "Schedule" %}
+{% set active = "schedule" %}
+
+{% block content %}
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="statements">Statements</button>
+    <button class="tab" data-tab="chasing">Chasing</button>
+    <button class="tab" data-tab="activity">Email activity</button>
+  </div>
+
+<!-- ================= STATEMENTS ================= -->
+<section id="tab-statements" class="tab-pane active">
+
+  <div class="card statement-card">
+    <div class="card__head">
+      <h3>Your statement plan</h3>
+      <p class="muted" style="max-width:640px;">
+        Choose when automatic statements go out, and who should get them.
+        You can send them weekly or monthly.
+      </p>
+    </div>
+
+    <div class="card__body">
+      <div class="stmt-rows">
+
+        <!-- ROW 1: Send statements automatically -->
+        <div class="stmt-row">
+          <label class="stmt-label">
+            Send statements automatically
+            <span class="help-wrapper" tabindex="0">
+              <span class="info-icon">i</span>
+              <span class="help-tooltip">
+                Turn this Off to stop all automatic statements.
+              </span>
+            </span>
+          </label>
+
+          <div class="stmt-control">
+            <select id="g_plan_enabled" style="display:none;">
+              <option value="true">On</option>
+              <option value="false">Off</option>
+            </select>
+            <!-- JS mounts the pill toggle after this -->
+          </div>
+        </div>
+
+        <!-- ROW 2: Frequency -->
+        <div class="stmt-row">
+          <label class="stmt-label">
+            Frequency
+            <span class="help-wrapper" tabindex="0">
+              <span class="info-icon">i</span>
+              <span class="help-tooltip">
+                Choose Weekly to send once per week, or Monthly to send once per month.
+                Only the selected schedule will run.
+              </span>
+            </span>
+          </label>
+
+          <div class="stmt-control">
+
+            <!-- Weekly / Monthly pill -->
+            <div id="g_freq_toggle" class="freq-toggle">
+              <div class="freq-toggle__track">
+                <span class="freq-toggle__opt" data-val="weekly">Weekly</span>
+                <span class="freq-toggle__opt" data-val="monthly">Monthly</span>
+              </div>
+            </div>
+
+            <!-- hidden real value -->
+            <input id="g_freq" type="hidden" value="weekly"/>
+
+            <!-- Which day to send -->
+            <div class="freq-detail">
+              <!-- Weekly only -->
+              <div id="weekly_day_wrap" class="freq-detail__row">
+                <span class="mini-label">Day of week</span>
+                <select id="g_week_day">
+                  <option value="0">Mon</option>
+                  <option value="1">Tue</option>
+                  <option value="2">Wed</option>
+                  <option value="3">Thu</option>
+                  <option value="4">Fri</option>
+                  <option value="5">Sat</option>
+                  <option value="6">Sun</option>
+                </select>
+              </div>
+
+              <!-- Monthly only -->
+              <div id="monthly_day_wrap" class="freq-detail__row" style="display:none;">
+                <span class="mini-label">Day of month</span>
+                <input
+                  id="g_month_day"
+                  type="number"
+                  min="1"
+                  max="31"
+                  step="1"
+                  value="1"
+                />
+              </div>
+            </div>
+
+            <!-- NOTE: removed the extra "Statements will go out..." hint here -->
+          </div>
+        </div>
+
+        <!-- ROW 3: Send time -->
+        <div class="stmt-row">
+          <label class="stmt-label">
+            Send time
+            <span class="help-wrapper" tabindex="0">
+              <span class="info-icon">i</span>
+              <span class="help-tooltip">
+                We’ll send the statements at this hour on the chosen day.
+              </span>
+            </span>
+          </label>
+
+          <div class="stmt-control">
+            <div class="inline-control">
+              <select id="g_week_hour">
+                <option value="00:00">00:00</option>
+                <option value="01:00">01:00</option>
+                <option value="02:00">02:00</option>
+                <option value="03:00">03:00</option>
+                <option value="04:00">04:00</option>
+                <option value="05:00">05:00</option>
+                <option value="06:00">06:00</option>
+                <option value="07:00">07:00</option>
+                <option value="08:00">08:00</option>
+                <option value="09:00">09:00</option>
+                <option value="10:00">10:00</option>
+                <option value="11:00">11:00</option>
+                <option value="12:00">12:00</option>
+                <option value="13:00">13:00</option>
+                <option value="14:00">14:00</option>
+                <option value="15:00">15:00</option>
+                <option value="16:00">16:00</option>
+                <option value="17:00">17:00</option>
+                <option value="18:00">18:00</option>
+                <option value="19:00">19:00</option>
+                <option value="20:00">20:00</option>
+                <option value="21:00">21:00</option>
+                <option value="22:00">22:00</option>
+                <option value="23:00">23:00</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 4: Customers / exclusions -->
+        <div class="stmt-row">
+          <label class="stmt-label">
+            Customers
+            <span class="help-wrapper" tabindex="0">
+              <span class="info-icon">i</span>
+              <span class="help-tooltip">
+                Pick who should (and shouldn’t) get statements for the selected schedule.
+              </span>
+            </span>
+          </label>
+
+          <div class="stmt-control">
+            <div class="stmt-actions">
+              <button
+                class="btn sm btn--ghost js-excl-manage"
+                type="button"
+                id="g_excl_btn"
+                data-freq="weekly"
+              >
+                All customers…
+              </button>
+            </div>
+            <!-- removed g_week_excl_sum / g_month_excl_sum -->
+          </div>
+        </div>
+
+        <!-- ROW 5: Update schedule button -->
+        <div class="stmt-row stmt-row--actions">
+          <label class="stmt-label"></label>
+          <div class="stmt-control">
+            <button
+              id="g_schedule_save"
+              class="btn sm btn--primary"
+              type="button"
+            >
+              Update schedule
+            </button>
+          </div>
+        </div>
+
+        <!-- ROW 6: Advanced rules -->
+        <div class="stmt-row stmt-row--noborder">
+          <label class="stmt-label">
+            Advanced rules
+            <span class="help-wrapper" tabindex="0">
+              <span class="info-icon">i</span>
+              <span class="help-tooltip" style="max-width:260px;">
+                Soon you'll be able to give VIP clients their own custom timing
+                (for example, every Friday at 15:00).
+              </span>
+            </span>
+          </label>
+
+          <div class="stmt-control">
+            <div class="muted" style="max-width:640px;">
+              Coming soon: send custom statements for specific customers
+              on their own day/time (for example, VIP clients every Friday at 15:00).
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.stmt-rows -->
+    </div><!-- /.card__body -->
+  </div><!-- /.statement-card -->
+
+  <!-- exclusions modal (unchanged) -->
+  <div id="g_excl_modal" class="modal" hidden>
+    <div class="modal__dialog">
+      <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;">
+        <strong>Global exclusions</strong>
+        <button
+          type="button"
+          id="g_excl_close"
+          aria-label="Close"
+          class="btn btn--ghost"
+        >
+          ×
+        </button>
+      </div>
+      <div class="modal__body">
+        <div class="muted" style="margin-bottom:8px;">
+          Uncheck customers to <em>exclude</em> them from automatic statements.
+        </div>
+        <div id="g_excl_list" class="list"></div>
+      </div>
+      <div class="modal__foot" style="display:flex;justify-content:flex-end;gap:8px;">
+        <button
+          type="button"
+          id="g_excl_save"
+          class="btn btn--primary"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+
+  <!-- ================= CHASING ================= -->
+  <section id="tab-chasing" class="tab-pane">
+
+    <!-- Manual send -->
+    <div class="card" id="ch_sendnow_card">
+      <div class="card__head">
+        <h3>Manual send</h3>
+        <p class="muted">
+          Send chasing emails immediately. Choose a cycle (or keep “Use defaults”) and optionally pick recipients.
+        </p>
+      </div>
+
+      <div class="card__body">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+
+          <!-- left group: cycle + recipients -->
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-weight:600;">Cycle</label>
+              <select id="ch_sendnow_sequence" style="min-width:260px">
+                <option value="">Use defaults</option>
+              </select>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-weight:600;">Recipients</label>
+              <button type="button" id="ch_sendnow_customers" class="btn sm btn--ghost">All customers…</button>
+              <span id="ch_sendnow_summary" class="muted" style="white-space:nowrap;">All included customers</span>
+            </div>
+          </div>
+
+          <!-- right group: send button -->
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button type="button" id="ch_sendnow_btn" class="btn btn--primary">Send now</button>
+            <span id="ch_sendnow_result" class="muted"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+      <!-- Invoice reminders / chasing schedule -->
+      <div class="card chasing-card">
+        <div class="card__head">
+          <h3>Invoice reminders</h3>
+          <p class="muted" style="max-width:640px;">
+            Turn automatic chasing on or off, pick when they go out, choose
+            which chasing cycle to use by default, and control who gets them.
+          </p>
+        </div>
+
+        <div class="card__body">
+          <div class="stmt-rows chas-rows">
+
+            <!-- ROW 1: Send invoice reminders automatically -->
+            <div class="stmt-row">
+              <label class="stmt-label">
+                Send invoice reminders automatically
+                <span class="help-wrapper" tabindex="0">
+                  <span class="info-icon">i</span>
+                  <span class="help-tooltip">
+                    Turn this Off to stop all chasing emails.
+                    (You can still send manually from “Manual send”.)
+                  </span>
+                </span>
+              </label>
+
+              <div class="stmt-control">
+                <!-- same toggle pattern as statements -->
+                <select id="ch_enabled" style="display:none;">
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+                <!-- JS mounts the .yn-toggle pill here -->
+              </div>
+            </div>
+
+            <!-- ROW 2: Default cycle -->
+            <div class="stmt-row">
+              <label class="stmt-label">
+                Default cycle
+                <span class="help-wrapper" tabindex="0">
+                  <span class="info-icon">i</span>
+                  <span class="help-tooltip" style="max-width:260px;">
+                    Pick which chasing sequence (cycle) to use for overdue invoices.
+                    You create & edit cycles in Message templates.
+                  </span>
+                </span>
+              </label>
+
+              <div class="stmt-control">
+                <select id="ch_sequence_default">
+                  <option value="">(choose cycle)</option>
+                  <!-- JS fills in the real options -->
+                </select>
+              </div>
+            </div>
+
+            <!-- ROW 3: Send time -->
+            <div class="stmt-row">
+              <label class="stmt-label">
+                Send time
+                <span class="help-wrapper" tabindex="0">
+                  <span class="info-icon">i</span>
+                  <span class="help-tooltip">
+                    We’ll send reminders every day at this hour,
+                    for customers who are included and have overdue invoices.
+                  </span>
+                </span>
+              </label>
+
+              <div class="stmt-control">
+                <div class="inline-control">
+                  <select id="ch_hour">
+                    <option value="00:00">00:00</option><option value="01:00">01:00</option>
+                    <option value="02:00">02:00</option><option value="03:00">03:00</option>
+                    <option value="04:00">04:00</option><option value="05:00">05:00</option>
+                    <option value="06:00">06:00</option><option value="07:00">07:00</option>
+                    <option value="08:00">08:00</option><option value="09:00">09:00</option>
+                    <option value="10:00">10:00</option><option value="11:00">11:00</option>
+                    <option value="12:00">12:00</option><option value="13:00">13:00</option>
+                    <option value="14:00">14:00</option><option value="15:00">15:00</option>
+                    <option value="16:00">16:00</option><option value="17:00">17:00</option>
+                    <option value="18:00">18:00</option><option value="19:00">19:00</option>
+                    <option value="20:00">20:00</option><option value="21:00">21:00</option>
+                    <option value="22:00">22:00</option><option value="23:00">23:00</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- ROW 4: Customers -->
+            <div class="stmt-row">
+              <label class="stmt-label">
+                Customers
+                <span class="help-wrapper" tabindex="0">
+                  <span class="info-icon">i</span>
+                  <span class="help-tooltip">
+                    Choose which customers should / shouldn’t be chased automatically.
+                  </span>
+                </span>
+              </label>
+
+              <div class="stmt-control">
+                <div class="stmt-actions">
+                  <button
+                    class="btn sm btn--ghost js-ch-excl-manage"
+                    type="button"
+                    id="ch_excl_btn"
+                  >
+                    All customers…
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ROW 5: Save -->
+            <div class="stmt-row stmt-row--noborder">
+              <label class="stmt-label"></label>
+              <div class="stmt-control">
+                <button id="ch_save" class="btn sm btn--primary" type="button">
+                  Update chasing
+                </button>
+              </div>
+            </div>
+
+          </div><!-- /.stmt-rows (reused for chasing) -->
+        </div><!-- /.card__body -->
+      </div><!-- /.card.chasing-card -->
+  </section>
+
+  <!-- ================= EMAIL ACTIVITY ================= -->
+  <section id="tab-activity" class="tab-pane">
+    <div class="panel" style="margin-top:12px;">
+      <div class="panel__head">
+        <div class="filters" style="gap:10px; flex-wrap:wrap;">
+          <select id="oa_status" title="Filter status">
+            <option value="all">All statuses</option>
+            <option value="queued">Queued</option>
+            <option value="processing">Processing</option>
+            <option value="sent">Sent</option>
+            <option value="delivered">Delivered</option>
+            <option value="bounced">Bounced</option>
+            <option value="complained">Complained</option>
+            <option value="failed">Failed</option>
+          </select>
+
+          <input id="oa_search" placeholder="Search email or subject…" />
+
+          <select id="oa_per" title="Rows per page">
+            <option value="20">20 / page</option>
+            <option value="50" selected>50 / page</option>
+            <option value="100">100 / page</option>
+          </select>
+        </div>
+
+        <div class="filters" style="gap:8px;">
+          <button id="oa_prev" class="btn btn--ghost">Prev</button>
+          <span id="oa_page_info" class="muted"></span>
+          <button id="oa_next" class="btn btn--ghost">Next</button>
+        </div>
+      </div>
+
+      <div style="padding:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>To</th>
+              <th>Subject</th>
+              <th>Status</th>
+              <th style="text-align:right;">Attempts</th>
+            </tr>
+          </thead>
+          <tbody id="oa_rows"></tbody>
+        </table>
+        <div id="oa_empty" class="empty" style="display:none;">No messages.</div>
+      </div>
+    </div>
+  </section>
+
+<script src="/static/js/schedule.js"></script>
+{% endblock %}

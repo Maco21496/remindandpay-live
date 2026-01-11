@@ -1,0 +1,22 @@
+<dialog id="pay_wizard" class="modal modal--wide">
+  <form method="dialog" class="modal__card" id="pay_form">
+    <header class="modal__head">
+      <h3 id="pay_title">Add payment</h3>
+      <button type="submit" class="modal__close" aria-label="Close">✕</button>
+    </header>
+
+    <!-- Visual stepper (same styles as upload wizard) -->
+    <ol class="wizard_steps" id="pay_steps" style="margin:12px;">
+      <li class="is-active">1. Details</li>
+      <li>2. Allocate</li>
+    </ol>
+
+    <section id="pay_body" class="wizard_body"></section>
+
+    <footer class="modal__foot">
+      <button type="button" id="pay_back" class="btn btn--ghost">Back</button>
+      <div style="flex:1"></div>
+      <button type="button" id="pay_next" class="btn">Next</button>
+    </footer>
+  </form>
+</dialog>

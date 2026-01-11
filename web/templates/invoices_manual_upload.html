@@ -1,0 +1,89 @@
+<!-- MANUAL (2-step) -->
+<dialog id="manual_wizard" class="modal modal--wide">
+  <form method="dialog" class="modal__card">
+    <header class="modal__head">
+      <h3>Add manual invoice</h3>
+      <button type="submit" class="modal__close" aria-label="Close">✕</button>
+    </header>
+
+    <!-- Steps -->
+    <ol class="wizard_steps">
+      <li id="mw_st1" class="is-active">1. Customer</li>
+      <li id="mw_st2">2. Invoices</li>
+    </ol>
+
+    <section id="mw_body" class="wizard_body"></section>
+
+    <footer class="modal__foot">
+      <button type="button" id="mw_back" class="btn btn--ghost">Back</button>
+      <div style="flex:1"></div>
+      <button type="button" id="mw_next" class="btn">Next</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- Step 1 template -->
+<template id="tpl_mw_step1">
+  <div class="subpanel">
+    <div class="field-row">
+      <input id="mw_customer_search" placeholder="Start typing customer name…" />
+      <button id="mw_btn_new_customer" type="button">+ New customer</button>
+    </div>
+    <div id="mw_customer_sugs" class="sugs" style="display:none"></div>
+
+    <!-- inline new customer -->
+    <div id="mw_new_customer_panel" class="subpanel" style="display:none; margin-top:10px;">
+      <div class="grid grid-4">
+        <div class="field"><label>Name</label><input id="mw_nc_name" /></div>
+        <div class="field"><label>Email</label><input id="mw_nc_email" /></div>
+        <div class="field"><label>Mobile</label><input id="mw_nc_phone" /></div>
+        <div class="field">
+          <label>Terms</label>
+          <select id="mw_nc_terms">
+            <option value="net_30" selected>Net 30</option>
+            <option value="net_60">Net 60</option>
+            <option value="month_following">Month following</option>
+            <option value="custom">Other (days)</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-4">
+        <div class="field" id="mw_nc_days_wrap" style="display:none">
+          <label>Days (if Other)</label>
+          <input id="mw_nc_days" placeholder="e.g. 45" />
+        </div>
+        <div class="field"></div><div class="field"></div>
+        <div class="field"><label>&nbsp;</label><button id="mw_btn_save_customer" type="button">Save customer</button></div>
+      </div>
+      <div id="mw_nc_msg" class="muted" style="margin-top:6px;"></div>
+    </div>
+
+    <input id="mw_customer_id" type="hidden" />
+    <div id="mw_cust_selected" class="muted" style="margin-top:8px;"></div>
+  </div>
+</template>
+
+<!-- Step 2 template -->
+<template id="tpl_mw_step2">
+  <div class="subpanel">
+    <div class="muted" style="margin-bottom:8px;">Enter as many rows as you like. Leave “Due date” blank to auto-compute from the customer’s terms.</div>
+    <div style="overflow:auto">
+      <table class="compact" style="min-width:760px">
+        <thead>
+          <tr>
+            <th style="width:140px">Invoice date *</th>
+            <th style="width:220px">Invoice number *</th>
+            <th style="width:140px">Amount *</th>
+            <th style="width:140px">Due date</th>
+            <th style="width:80px"></th>
+          </tr>
+        </thead>
+        <tbody id="mw_rows"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px; display:flex; gap:8px;">
+      <button type="button" id="mw_add_row" class="btn btn--ghost">+ Add row</button>
+      <div id="mw_msg" class="muted" style="margin-left:auto;"></div>
+    </div>
+  </div>
+</template>

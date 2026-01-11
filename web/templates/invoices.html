@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% set title = "Invoices · Remind & Pay" %}
+{% set active = "invoices" %}
+{% block content %}
+{% include "invoices_manual_upload.html" %}
+{% include "invoices_upload_wizard.html" %}
+
+<h1>Invoices</h1>
+
+<!-- Actions -->
+<div class="panel" style="display:flex;gap:10px;align-items:center;">
+  <button id="btn_open_manual_invoice" type="button" class="btn btn--ghost">Add manual invoice</button>
+  <button id="btn_open_upload_wizard" type="button" class="btn btn--ghost">Upload in bulk</button>
+</div>
+
+<!-- KPIs -->
+<section class="kpis" style="grid-template-columns:repeat(4,1fr);margin-top:12px;">
+  <div class="kpi"><div class="kpi__label">Outstanding</div><div class="kpi__value" id="kpi-outstanding">£0.00</div></div>
+  <div class="kpi"><div class="kpi__label">Overdue</div><div class="kpi__value" id="kpi-overdue">£0.00</div></div>
+  <div class="kpi"><div class="kpi__label">Due this week</div><div class="kpi__value" id="kpi-duesoon">£0.00</div></div>
+  <div class="kpi"><div class="kpi__label">Paid this month</div><div class="kpi__value" id="kpi-paidmonth">£0.00</div></div>
+</section>
+
+<!-- Tabs for main list vs imported queue -->
+<nav id="inv_tabs" class="tabbar" style="margin-top:12px; margin-bottom:8px;">
+  <button id="inv_tab_main" class="tab is-active" data-tab="main">Invoices</button>
+  <button id="inv_tab_imported" class="tab" data-tab="imported">Imported invoices</button>
+</nav>
+
+<!-- MAIN INVOICE LIST -->
+<section id="inv_panel_main" class="panel" style="margin-top:0;">
+  <div class="panel__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <h2 style="margin-right:12px;">Invoices</h2>
+      <nav id="inv_filters" class="chipbar">
+        <button class="chip is-active" data-filter="all">All</button>
+        <button class="chip" data-filter="open">Open</button>
+        <button class="chip" data-filter="overdue">Overdue</button>
+        <button class="chip" data-filter="paid">Paid</button>
+      </nav>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="inv_search" type="search" placeholder="Search customer or number…" style="height:36px;padding:0 10px;min-width:260px;">
+      <select id="inv_per" style="height:36px;">
+        <option>20</option><option selected>50</option><option>100</option>
+      </select>
+      <button id="btn_refresh" class="chip">Refresh</button>
+    </div>
+  </div>
+
+  <div style="padding:12px;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:110px;">Issued</th>
+          <th style="width:110px;">Due</th>
+          <th>Customer</th>
+          <th style="width:120px;">Number</th>
+          <th style="text-align:right;width:140px;">Amount</th>
+          <th style="text-align:right;width:160px;">Remaining</th>
+          <th style="width:110px;">Status</th>
+        </tr>
+      </thead>
+      <tbody id="inv_rows"></tbody>
+    </table>
+    <div id="inv_empty" class="empty" style="display:none;">No invoices match.</div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
+      <div id="inv_page_info" class="muted">Page 1 / 1</div>
+      <div style="display:flex;gap:6px;">
+        <button id="inv_prev" class="btn btn--ghost">Prev</button>
+        <button id="inv_next" class="btn btn--ghost">Next</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- IMPORTED INVOICE QUEUE -->
+<section id="inv_panel_imported" class="panel" style="margin-top:0; display:none;">
+  <div class="panel__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <h2>Imported invoices (email queue)</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="invq_import" class="btn" type="button">Import selected</button>
+      <button id="invq_refresh" class="btn btn--subtle" type="button">Refresh</button>
+      <button id="invq_clear" class="btn btn--ghost" type="button">Clear all</button>
+      <span id="invq_msg" class="muted"></span>
+    </div>
+  </div>
+
+    <!-- auto-import toggle -->
+  <div style="display:flex;align-items:center;gap:10px;">
+    <label class="switch">
+      <input id="invq_auto_toggle" type="checkbox">
+      <span class="slider"></span>
+    </label>
+    <span><strong>Auto-import valid invoices</strong></span>
+    <span id="invq_auto_note" class="muted"></span>
+  </div>
+
+
+  <div style="padding:12px;">
+    <p class="muted" style="margin-top:0;margin-bottom:8px;">
+      These are invoices detected from your inbound email address. When imported, they’ll appear in your main invoice list.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px;"><input id="invq_all" type="checkbox" /></th>
+          <th style="width:170px;">Received</th>
+          <th style="width:80px;">Source</th>
+          <th>Filename</th>
+          <th style="width:120px;">Invoice #</th>
+          <th style="width:120px;">Invoice date</th>
+          <th style="width:120px;">Due date</th>
+          <th style="width:120px;">Amount</th>
+          <th>Customer match</th>
+          <th style="width:120px;">Status</th>
+          <th>Error</th>
+          <th style="width:90px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="invq_rows"></tbody>
+    </table>
+    <div id="invq_empty" class="empty" style="display:none;">No imported invoices in the queue.</div>
+  </div>
+</section>
+
+<!-- existing invoice modals and shared JS -->
+<script src="/static/js/invoices.js"></script>
+<script src="/static/js/invoices_manual_upload.js"></script>
+<script src="/static/js/invoices_upload_wizard.js"></script>
+{% endblock %}

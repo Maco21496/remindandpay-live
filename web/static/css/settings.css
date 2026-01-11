@@ -1,0 +1,207 @@
+/* FINAL VERSION OF settings.css */
+
+/* ---- Generic tweaks for this page ---- */
+.panel--wide { max-width: none; }
+.subpanel    { padding:12px; border:1px solid #eee; border-radius:8px; }
+
+/* Hide the internal template <select> used by block_mapper_ui.js */
+.bm-template-selector {
+  display: none;
+}
+
+/* Optional highlight style for selected template in left list */
+#ii_template_list .is-selected {
+  background:#eff6ff !important;
+}
+
+/* ---- Visual Mapper (VM) ---- */
+
+.vm-topbar {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.vm-grid {
+  display:grid;
+  grid-template-columns: 360px 1fr;
+  gap:12px;
+  align-items:start;
+  margin-top:10px;
+}
+
+.vm-sidebar {
+  background:#fff;
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:10px;
+}
+
+/* Header row above the two-column field list */
+.vm-listhead{
+  display:grid;
+  grid-template-columns: 1fr auto;
+  column-gap:10px;
+  align-items:center;
+  margin:6px 0 8px;
+}
+.vm-coltitle{
+  font-weight:600;
+  color:#111827;
+}
+.vm-coltitle--right{
+  text-align:right;
+  padding-right:8px;
+}
+
+/* Field list: single column, compact rows */
+.vm-fieldlist {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+/* Left pill: radio + full text line */
+.vm-pill {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border:1px solid #d1fae5;
+  border-radius:999px;
+  background:#fef9c3; /* yellow, matching PDF labels */
+  min-height:32px;
+}
+
+.vm-pill--row {
+  justify-content:space-between;
+}
+
+.vm-pill-main {
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+/* Make the left-hand field pills yellow inside the VM sidebar */
+.vm-sidebar .vm-pill {
+  background:#fef9c3; /* matches yellow label boxes in PDF preview */
+}
+
+/* Right pill: current value + tick */
+.vm-value {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 10px;
+  border:1px solid #e5e7eb;
+  border-radius:999px;
+  min-height:36px;
+  max-width:100%;
+}
+.vm-value .vm-text{
+  color:#111827;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:220px;
+}
+
+/* In the VM sidebar, make the value column wide and right-aligned */
+.vm-sidebar .vm-value {
+  justify-content:flex-end;
+  gap:4px;
+  min-width:180px;
+  flex-wrap:nowrap;
+}
+
+/* Tick badge (grey ring by default → green ring + ✓ when set) */
+.vm-check{
+  display:inline-block;
+  width:18px;
+  height:18px;
+  border-radius:999px;
+  border:1px solid #cbd5e1;
+  color:#16a34a;
+  line-height:16px;
+  text-align:center;
+  font-size:12px;
+}
+.vm-check::before{ content:""; }           /* empty by default */
+.vm-check--ok{ border-color:#86efac; }     /* green ring when set */
+.vm-check--ok::before{ content:"✓"; }      /* show tick when set */
+
+/* Inline editor under the list */
+.vm-editor {
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px dashed #e5e7eb;
+}
+.vm-editor .vm-filter-row{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+/* Canvas wrapper */
+.vm-canvaswrap{
+  position:relative;
+  border:1px solid #eee;
+  border-radius:8px;
+  overflow:auto;
+  background:#fff;
+}
+.vm-canvaswrap canvas{ display:block; background:#fff; }
+
+/* Hide the small number badge we overlay inside each box */
+.bm-box{ box-sizing:border-box; }
+.bm-box > div{ display:none !important; }
+
+/* NEW: number + value badges in the left sidebar, matching PDF colours */
+
+/* Yellow number badge for value column (e.g. "1.") */
+.vm-badge-num {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0 6px;
+  height:18px;
+  border-radius:9px;
+  font-size:11px;
+  font-weight:700;
+  background:#fef9c3; /* yellow */
+  border:1px solid rgba(0,0,0,.06);
+  color:#111827;
+  white-space:nowrap;
+}
+
+/* Green value badge (e.g. "790") */
+.vm-badge-value {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0 6px;
+  height:18px;
+  border-radius:9px;
+  font-size:11px;
+  font-weight:700;
+  background:#dcfce7; /* green */
+  border:1px solid rgba(0,0,0,.06);
+  color:#111827;
+  max-width:180px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* Nudge the status dot a little to the right of the badges */
+.vm-sidebar .vm-value .vm-dot {
+  margin-left:4px;
+}
+
+/* Responsive tweak */
+@media (max-width: 980px){
+  .vm-grid{ grid-template-columns: 1fr; }
+}

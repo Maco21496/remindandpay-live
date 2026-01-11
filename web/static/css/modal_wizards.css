@@ -1,0 +1,17 @@
+/* Shared styles for dialog-based modals and multi-step wizards */
+
+/* Make the inner card stretch to the dialog width so there is no unused blank area */
+dialog.modal .modal__card {
+  width: 100%;
+  max-width: none;
+}
+
+/* Optional: slightly taller scroll area for wizard bodies */
+dialog.modal .wizard_body {
+  max-height: 65vh;
+}
+
+/* Width helpers also available on <dialog> */
+dialog.modal.modal--wide { width: min(1200px, 96vw); }
+dialog.modal.modal--xl   { width: min(1400px, 98vw); }
+

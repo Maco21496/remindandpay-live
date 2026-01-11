@@ -1,0 +1,814 @@
+/* =====================================================================================
+   1) DESIGN TOKENS
+   ===================================================================================== */
+:root{
+  /* Surfaces */
+  --bg:#f7f8fb;
+  --card:#ffffff;
+  --line:#e6e8ee;
+
+  /* Text */
+  --text:#111827;
+  --muted:#6b7280;
+
+  /* Brand & accents (pastel) */
+  --brand-700:#4f46e5;
+  --brand-600:#6366f1;
+  --brand-500:#818cf8;
+  --brand-200:#dbe5ff;
+  --brand-100:#eef2ff;
+
+  --accent-600:#14b8a6;  /* teal */
+  --accent-100:#d1fae5;
+
+  --warn-600:#f59e0b;
+  --warn-100:#fef3c7;
+
+  --danger-600:#ef4444;
+  --danger-100:#fee2e2;
+
+  --info-600:#06b6d4;
+  --info-100:#cffafe;
+
+  --link:var(--brand-600);
+  --chip:#f1f5f9;
+  /* Charts inherit branding */
+  --chart-bar: var(--brand-600);
+  --chart-line: var(--brand-700);
+  --chart-grid: var(--line);
+}
+
+/* =====================================================================================
+   2) BASE / GLOBAL
+   ===================================================================================== */
+*{ box-sizing:border-box }
+html,body{
+  margin:0; padding:0;
+  background:var(--bg); color:var(--text);
+  font:14px/1.45 system-ui, Segoe UI, Roboto, Arial, sans-serif;
+}
+h1{ margin:0 0 12px }
+h2{ margin:0 }
+a{ color:var(--link); text-decoration:none }
+/* Site-wide page container: stretch on wide screens */
+.content{
+  /* side padding scales with viewport; keeps decent gutters */
+  padding: 20px clamp(12px, 2vw, 24px);
+  /* grow with viewport but cap for readability */
+  max-width: clamp(1100px, 96vw, 1600px);
+  margin: 0 auto;
+}
+@media (min-width: 1800px){
+  .content{ max-width: 1760px; }
+}
+
+/* =====================================================================================
+   3) TOP BAR & NAV
+   ===================================================================================== */
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 16px;
+  position:sticky; top:0; z-index:10;
+  background:linear-gradient(180deg, var(--brand-100), #fff 65%);
+  border-bottom:1px solid var(--line);
+  backdrop-filter:saturate(120%) blur(2px);
+}
+.brand{ font-weight:800; color:#1f2937 }
+.topbar__left { display:flex; align-items:center; gap:12px; }
+.topbar__right{ display:flex; gap:16px; align-items:center }
+.toplink{ color:var(--brand-700) }
+.avatar{ display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; background:#e2e8f0; font-weight:600 }
+
+.topbar__nav{ display:flex; gap:6px; margin-left:8px }
+.navlink{ padding:8px 12px; border-radius:10px; color:#111827; }
+.navlink:hover{ background:var(--brand-100); }
+.navlink.active{ background:var(--brand-200); outline:1px solid var(--brand-500); }
+
+/* Page header with right-aligned actions */
+.pagebar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin:0 0 10px;
+}
+.pagebar__actions{ display:flex; gap:8px; flex-wrap:wrap; }
+@media (max-width:640px){
+  .pagebar{ flex-direction:column; align-items:flex-start }
+}
+
+/* 3a) Pagebar three-column helper */
+.pagebar--three{
+  display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
+}
+.pagebar--three .pagebar__title{ justify-self:start; }
+.pagebar--three .pagebar__spacer{ justify-self:end; }
+
+/* =====================================================================================
+   4) BUTTONS (GLOBAL)
+   ===================================================================================== */
+.btn{
+  display:inline-block;
+  padding:8px 12px;
+  border-radius:10px;
+  text-decoration:none;
+  border:1px solid transparent;
+  background:var(--brand-600);
+  color:#fff;
+  box-shadow:0 1px 0 rgba(17,17,26,.05);
+  cursor:pointer;
+}
+
+/* Only the primary button turns blue on hover */
+.btn:not(.btn--ghost):not(.btn--subtle):hover {
+  background: var(--brand-700);
+}
+
+/* Ghost & subtle keep light backgrounds on hover */
+.btn--ghost:hover {
+  background: #f8fafc;                 /* very light */
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+}
+
+.btn--subtle:hover {
+  background: var(--brand-200);         /* slightly stronger tint */
+  border-color: var(--brand-500);
+  color: var(--brand-700);
+}
+
+/* =====================================================================================
+   5) CHIPS / FILTERS
+   ===================================================================================== */
+.chip{
+  border:1px solid var(--brand-200); background:#fff; border-radius:999px;
+  padding:6px 10px; cursor:pointer; color:#111827;
+}
+.chip.is-active{ background:var(--brand-600); border-color:var(--brand-600); color:#fff; }
+.filters{ display:flex; gap:8px }
+
+/* =====================================================================================
+   6) KPI CARDS
+   ===================================================================================== */
+.kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:12px 0 20px }
+.kpi{
+  background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px;
+  box-shadow:0 1px 0 rgba(17,17,26,.03), 0 8px 24px rgba(17,17,26,.04);
+}
+.kpi__label{ color:var(--muted); font-size:12px }
+.kpi__value{ font-size:22px; font-weight:800; margin-top:6px; color:#0f172a }
+
+/* =====================================================================================
+   7) PANELS / CARDS
+   ===================================================================================== */
+.panel{
+  background:var(--card); border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 1px 0 rgba(17,17,26,.03), 0 8px 24px rgba(17,17,26,.04);
+}
+.panel__head{
+  display:flex; align-items:center; justify-content:space-between; padding:12px;
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#fff, #fafbff 70%);
+}
+
+/* Sub panels & helpers */
+.subpanel{ margin-top:10px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fafbff }
+.grid{ display:grid; gap:12px }
+.grid.grid-4{ grid-template-columns:repeat(4, minmax(180px, 1fr)) }
+@media (max-width:960px){ .grid.grid-4{ grid-template-columns:repeat(2, minmax(180px, 1fr)) } }
+@media (max-width:600px){ .grid.grid-4{ grid-template-columns:1fr } }
+
+/* Generic cards */
+.card{ border:1px solid var(--line); border-radius:12px; background:#fff; margin-top:12px; }
+.card__head{ padding:12px 14px; border-bottom:1px solid var(--line); }
+.card__body{ padding:14px; }
+
+/* =====================================================================================
+   8) TABLES
+   ===================================================================================== */
+table{ width:100%; border-collapse:collapse; font-size:14px }
+th, td{ padding:8px 10px; border-top:1px solid var(--line); text-align:left }
+thead th{
+  border-top:none; color:#475569; font-weight:700;
+  background:linear-gradient(180deg,#f8fafc, var(--brand-100) 120%);
+}
+
+/* Keep Flatpickr safe from global table rules */
+.flatpickr-calendar table { width:auto !important; border-collapse:collapse; font-size:inherit; }
+.flatpickr-calendar th, .flatpickr-calendar td {
+  padding:0 !important; border:0 !important; text-align:center !important;
+}
+.flatpickr-calendar { z-index:100000 !important; }
+.modal__card { overflow:visible; }      /* allow popups in modals */
+
+/* Charts (dashboard + customer views) */
+.chart svg .bar  { fill: var(--chart-bar); opacity: .9; }
+.chart svg .line { stroke: var(--chart-line); stroke-width: 2; fill: none; opacity: .9; }
+.chart svg .dot  { fill: var(--chart-line); }
+.chart svg .grid { stroke: var(--chart-grid); }
+
+/* =====================================================================================
+   9) TEXT HELPERS
+   ===================================================================================== */
+.muted{ color:var(--muted) }
+.empty{ padding:18px; color:var(--muted) }
+
+/* =====================================================================================
+   10) COLLAPSIBLE / FOLDS
+   ===================================================================================== */
+.fold{ border:1px solid var(--line); border-radius:12px; background:#fff }
+.fold > summary{
+  list-style:none; cursor:pointer; padding:12px 14px; border-bottom:1px solid var(--line);
+  display:flex; align-items:baseline; gap:10px;
+}
+.fold > summary::-webkit-details-marker{ display:none }
+.fold__title{ font-weight:700 }
+.fold__hint{ color:var(--muted); font-size:12px }
+.fold[open] > summary .fold__hint{ display:none }
+.fold__body{ padding:14px }
+
+/* =====================================================================================
+   11) FORMS
+   ===================================================================================== */
+.field{ display:flex; flex-direction:column; gap:6px }
+.field label{ font-size:12px; color:var(--muted) }
+.field-row{ display:flex; gap:8px; align-items:center }
+.sugs{ margin-top:6px }
+
+/* Primary action buttons in forms (full width) */
+#btn_save_invoice, #btn_save_customer, #btn_import_csv{ width:100%; height:36px }
+
+/* =====================================================================================
+   12) STATUS PILLS
+   ===================================================================================== */
+.pill{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:#eef2ff; color:#1e293b }
+.pill.paid{ background:var(--accent-100); color:#166534 }
+.pill.chasing{ background:var(--warn-100); color:#9a3412 }
+.pill.disputed{ background:var(--danger-100); color:#7f1d1d }
+.pill.delivered { background: var(--accent-100); color:#166534; }
+.pill.bounced   { background: var(--danger-100); color:#7f1d1d; }
+.pill.complained{ background: #fde68a; color:#92400e; }  /* amber-ish */
+.pill.failed    { background: var(--danger-100); color:#7f1d1d; }
+.pill.processing{ background: var(--brand-100); color:#1e3a8a; }
+.pill.sent      { background: var(--brand-100); color:#1e3a8a; }
+.pill.queued    { background: #f1f5f9; color:#334155; }
+.pill.retrying  { background: #fef3c7; color:#92400e; }
+
+/* =====================================================================================
+   13) MODALS & WIZARDS
+   ===================================================================================== */
+.modal{ border:none; padding:0; width:min(920px, 96vw); }
+.modal.modal--wide{ width:min(1200px, 96vw); }
+.modal.modal--xl{ width:min(1400px, 98vw); }
+dialog.modal.modal--wide{ width:min(1200px, 96vw); }
+dialog.modal.modal--xl{ width:min(1400px, 98vw); }
+.modal::backdrop{ background:rgba(0,0,0,.35) }
+.modal__card{
+  display:flex; flex-direction:column;
+  background:#fff; border:1px solid var(--line); border-radius:12px;
+  overflow:visible; /* allow date pickers, etc. */
+}
+.modal__head, .modal__foot{ padding:12px; border-bottom:1px solid var(--line); background:#fff }
+.modal__foot{ border-top:1px solid var(--line); border-bottom:none; display:flex; align-items:center; gap:8px }
+.modal__head{ display:flex; align-items:center; justify-content:space-between }
+.modal__close{ border:none; background:#fff; width:28px; height:28px; border-radius:6px; cursor:pointer }
+.modal__close:hover{ background:#f3f4f6 }
+
+.wizard_body{ padding:14px; max-height:60vh; overflow:auto; }
+
+/* Stepper */
+.wizard_steps{
+  display:flex; list-style:none; padding:0; margin:12px 0 16px;
+  counter-reset:wizardstep; overflow:hidden; border-radius:12px;
+}
+.wizard_steps li{
+  position:relative; flex:1 1 0; text-align:left;
+  padding:12px 20px 12px 44px;
+  background:var(--brand-100); color:#334155; font-weight:600;
+}
+.wizard_steps li::before{
+  counter-increment:wizardstep; content:counter(wizardstep);
+  position:absolute; left:12px; top:50%; transform:translateY(-50%);
+  width:22px; height:22px; line-height:22px; text-align:center; font-size:12px;
+  border-radius:999px; background:#fff; color:#334155; box-shadow:0 0 0 2px var(--brand-200) inset;
+}
+.wizard_steps li::after{
+  content:""; position:absolute; top:0; right:-16px; width:0; height:0;
+  border-top:24px solid transparent; border-bottom:24px solid transparent; border-left:16px solid var(--brand-100); z-index:1;
+}
+.wizard_steps li:last-child::after{ display:none }
+.wizard_steps li.is-active{ background:#0f172a; color:#fff }
+.wizard_steps li.is-active::after{ border-left-color:#0f172a }
+.wizard_steps li.is-active::before{ background:#fff; color:#0f172a; box-shadow:0 0 0 2px #0f172a inset }
+.wizard_steps li.is-complete{ background:var(--accent-600); color:#fff }
+.wizard_steps li.is-complete::after{ border-left-color:var(--accent-600) }
+.wizard_steps li.is-complete::before{ content:"✓"; background:#fff; color:#166534; font-weight:900; box-shadow:0 0 0 2px var(--accent-600) inset }
+@media (max-width:640px){
+  .wizard_steps{ flex-direction:column; border-radius:10px }
+  .wizard_steps li{ padding:10px 12px 10px 40px }
+  .wizard_steps li::after{ display:none }
+}
+
+/* Row error highlight */
+tr.has-error { background:#fff1f2; }
+
+/* =====================================================================================
+   14) ACTIONS BAR (More menu)
+   ===================================================================================== */
+.actions-bar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.actions__more{ position:relative; }
+.actions__menu{
+  position:absolute; right:0; top:calc(100% + 6px); min-width:220px;
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  box-shadow:0 10px 24px rgba(17,17,26,.08); padding:6px; z-index:50;
+}
+.actions__menu::before{
+  content:""; position:absolute; right:18px; top:-6px; width:10px; height:10px;
+  background:var(--card); border-left:1px solid var(--line); border-top:1px solid var(--line);
+  transform:rotate(45deg);
+}
+.actions__menu .menu__item{
+  display:block; width:100%; text-align:left; padding:8px 10px;
+  border:0; background:transparent; color:inherit; text-decoration:none;
+  border-radius:8px; cursor:pointer; font:inherit;
+}
+.actions__menu .menu__item:hover,
+.actions__menu .menu__item:focus-visible{ background:var(--brand-100); outline:none; }
+.actions__menu .menu__item[disabled]{ opacity:.6; cursor:default; pointer-events:none; }
+.actions__menu .menu__sep{ border:0; height:1px; margin:6px 4px; background:var(--line); }
+@media (max-width:520px){ .actions__menu{ right:auto; left:0; } }
+
+/* Compact kebab (⋯) actions menu */
+.kebab { position: relative; display: inline-block; }
+.kebab > summary{
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  line-height: 1;
+  font-size: 18px;
+  width: 28px;
+  text-align: center;
+  background: #fff;
+}
+.kebab > summary::-webkit-details-marker{ display:none; }
+.kebab[open] > summary{ background: #f8fafc; }
+
+.kebab .menu{
+  position: absolute;
+  right: 0;
+  margin-top: 6px;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.07);
+  padding: 6px;
+  z-index: 30;
+}
+.kebab .menu button,
+.kebab .menu a{
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  color: inherit;
+}
+.kebab .menu button:hover,
+.kebab .menu a:hover{ background: var(--brand-100); }
+
+
+/* =====================================================================================
+   15) CUSTOMER DASHBOARD BADGES & ROW TWEAKS
+   ===================================================================================== */
+.badge{
+  display:inline-block; font-size:12px; padding:2px 6px; border-radius:10px;
+  margin-left:6px; vertical-align:middle;
+}
+.badge--warn  { background:#fee2e2; color:#991b1b; }  /* Unpaid */
+.badge--amber { background:#fef3c7; color:#92400e; }  /* Part-paid */
+button.link { background:none; border:0; padding:0; color:#4f46e5; cursor:pointer; }
+tr.alloc td { color:#64748b; font-style:italic; }
+
+/* =====================================================================================
+   16) TABS (generic)
+   ===================================================================================== */
+.tabs { display:flex; gap:8px; margin:8px 0 12px; }
+.tab { padding:6px 12px; border:1px solid var(--brand-200); border-radius:8px; background:#fff; cursor:pointer; color:#111827; }
+.tab.active { background:var(--brand-600); color:#fff; border-color:var(--brand-600); font-weight:600; }
+.tab-pane { display:none; }
+.tab-pane.active { display:block; }
+
+/* =====================================================================================
+   17) SCHEDULE PAGE (scoped)
+   ===================================================================================== */
+
+/* Cards used on schedule */
+.card { border:1px solid var(--line); border-radius:12px; background:#fff; }
+.card__head { padding:12px 14px; border-bottom:1px solid var(--line); }
+.card__body { padding:14px; }
+
+/* Compact row layout for statements editor */
+.row-form{
+  display:grid;
+  grid-template-columns:260px auto 110px 220px 140px auto; /* Name | Freq | Time | Day | Enabled | Save */
+  gap:12px; align-items:end;
+}
+@media (max-width:1200px){ .row-form{ grid-template-columns:240px auto 110px 200px 130px auto; } }
+@media (max-width:1100px){ .row-form{ grid-template-columns:1fr 1fr 110px 1fr 140px auto; } }
+@media (max-width:840px){  .row-form{ grid-template-columns:1fr; } }
+
+/* Schedule-specific field sizing */
+.field label{ display:block; font-size:.9rem; margin-bottom:6px; color:#6b7280; }
+.field input, .field select{ width:100%; }
+.field--time input { max-width:110px; }
+.field--month input{ max-width:90px; }
+.field--enabled select{ max-width:140px; }
+
+/* Schedule buttons — SCOPED so they don't override global .btn */
+.row-form .btn{
+  padding:8px 12px; border-radius:10px;
+  border:1px solid var(--line);
+  background:#fff; color:#111827;
+  cursor:pointer;
+}
+.row-form .btn.primary{ background:var(--brand-600); color:#fff; border-color:var(--brand-600); }
+.row-form .btn.outline{ background:#fff; color:#111827; }
+.row-form .btn:disabled{ opacity:.6; cursor:not-allowed; }
+.row-form .btn.sm{ padding:6px 10px; font-size:.9rem; border-radius:8px; }
+
+/* =====================================================================================
+   18) DATE PICKER (global safety)
+   ===================================================================================== */
+.flatpickr-calendar { z-index:100000 !important; }        /* ensure over modals */
+dialog .flatpickr-calendar { position:fixed !important; } /* avoid inner scroll misalign */
+
+/* =====================================================================================
+   19) USER SETTINGS 
+   ===================================================================================== */
+.userbox { position: relative; }
+
+.userbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text);
+}
+.userbtn:hover { background: #f8fafc; }
+.userbtn .caret { fill: #64748b; }
+.userbtn__initials { font-weight: 700; }
+
+.usermenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(17,17,26,.08);
+  padding: 6px;
+  z-index: 60;
+}
+
+.usermenu .menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.usermenu .menu__item:hover,
+.usermenu .menu__item:focus-visible {
+  background: var(--brand-100);
+  outline: none;
+}
+
+.usermenu .menu__sep {
+  border: 0;
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+/* ===================== Simple globals UI (toggle + modal) ===================== */
+
+/* Yes/No pill toggle */
+.yn-toggle{
+  --on:#16a34a;   /* green */
+  --off:#ef4444;  /* red  */
+  position:relative;
+  display:inline-flex; align-items:center;
+  width:64px; height:30px; border-radius:999px;
+  background:var(--off); cursor:pointer;
+  transition:background .15s ease;
+}
+.yn-toggle.is-on{ background:var(--on); }
+.yn-toggle__knob{
+  position:absolute; top:3px; left:3px;
+  width:24px; height:24px; border-radius:999px;
+  background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2);
+  transition:left .15s ease;
+}
+.yn-toggle.is-on .yn-toggle__knob{ left:37px; }
+
+/* small variant (used by JS) */
+.yn-toggle.yn-sm{ width:48px; height:24px; }
+.yn-toggle.yn-sm .yn-toggle__knob{ width:18px; height:18px; top:3px; left:3px; }
+.yn-toggle.yn-sm.is-on .yn-toggle__knob{ left:27px; }
+
+.yn-toggle__text{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:#fff; user-select:none;
+  pointer-events:none;
+  padding:0 10px; /* ensure text like 'Off' isn't clipped */
+  letter-spacing:.2px;
+}
+
+/* Schedule rows: 5 columns (title/toggle, hour, day, customers, save) */
+.row-form--schedule{
+  display:grid;
+  /* widen the 2nd column so label + select fit on one line */
+  grid-template-columns: 220px 200px 220px 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+/* Center the middle controls to tidy layout on the Statements tab */
+#tab-statements .row-form--schedule .field--title{ justify-self:start; }
+#tab-statements .row-form--schedule .field--inline{ justify-self:center; }
+#tab-statements .row-form--schedule .actions--end{ justify-self:end; }
+
+/* Give the controls consistent visual widths so columns align nicely */
+#tab-statements #g_week_hour,
+#tab-statements #g_month_hour{ width:110px; }
+#tab-statements #g_week_day{ width:120px; }
+#tab-statements #g_month_day{ width:72px; text-align:center; }
+
+/* Center the Weekly/Monthly label to feel like a mini-title */
+.section-title{
+  font-weight:700;
+  font-size:1.05rem;
+}
+
+/* Inline title + toggle */
+.title-row{ display:flex; align-items:center; gap:10px; }
+
+/* Inline label+control for 'Send hour', 'Day of week/month', etc. */
+.field--inline{ display:flex; align-items:center; gap:8px; }
+/* Make label sit on the same line, remove bottom margin from global .field label */
+.row-form--schedule .field--inline label{
+  display:inline-block !important;
+  margin:0 8px 0 0 !important;
+  font-weight:600; color:var(--text);
+}
+/* Keep the control right next to the label */
+.row-form--schedule .field--inline select,
+.row-form--schedule .field--inline input{
+  width:auto !important;
+  min-width:120px;
+}
+
+/* Right-aligned small blocks (customers + save) */
+.actions--end{
+  align-self:end;
+  justify-self:end;
+  text-align:right;
+}
+.actions--end .muted{
+  display:block;
+  margin-top:4px;
+}
+
+
+/* Buttons */
+.btn.sm{ padding:6px 10px; font-size:14px; }
+  .btn.btn--ghost{ background:transparent; color:var(--brand-700); }
+  .btn.btn--primary{ background:var(--brand-600); color:#fff; border-color:transparent; }
+  .btn.btn--primary:hover{ background:var(--brand-700); }
+
+/* ---------- Modal overlay & dialog ---------- */
+div.modal{
+  position:fixed; inset:0;
+  align-items:center; justify-content:center;
+  background:rgba(15,23,42,.55);
+  z-index:1000;
+}
+
+/* DIV-based modals (your schedule exclusions) */
+.modal[hidden]{ display:none !important; }  /* hidden => off */
+div.modal{ display:flex; }                  /* visible when not hidden */
+
+/* DIALOG-based modals (your invoice uploader) */
+dialog.modal{ display:none; }               /* default: off */
+dialog.modal[open]{ display:flex; }         /* only show when open */
+.modal__dialog{
+  background:#fff; width:min(800px,92vw);
+  border-radius:12px; box-shadow:0 20px 70px rgba(0,0,0,.30);
+  max-height:80vh; overflow:auto;
+}
+.modal__head{ padding:14px 16px; border-bottom:1px solid #e7e7ea; }
+.modal__body{ padding:14px 16px; }
+.modal__foot{ padding:12px 16px; border-top:1px solid #e7e7ea; }
+
+/* Exclusions picker list */
+.list{ display:grid; gap:6px; }
+.excl-item{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 10px; border:1px solid #e7e7ea; border-radius:8px;
+}
+.excl-item__left{ display:flex; gap:8px; align-items:center; }
+.excl-item__right{ color:#6b7280; font-size:12px; }
+
+/* Helpers */
+.input{ height:34px; padding:0 10px; border:1px solid #d7d7dc; border-radius:8px; width:100%; }
+.table-mini{ width:100%; border-collapse:collapse; font-size:14px; }
+.table-mini th,.table-mini td{ padding:8px 6px; border-bottom:1px solid #eee; }
+.muted{ color:#6b7280; }
+
+/* Inline exclusions popover */
+.excl-popover{
+  position: absolute;
+  z-index: 9999;
+  width: 360px;
+  max-height: 400px;
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  box-shadow: 0 14px 30px rgba(0,0,0,0.12);
+  overflow: hidden;
+}
+.excl-popover__head{
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #EEE;
+}
+.excl-popover__head .title{
+  font-weight: 600;
+}
+.excl-popover__search{
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #DDD;
+  border-radius: 6px;
+}
+.excl-popover__body{
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px 12px;
+}
+.excl-popover__list .excl-item{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 6px;
+}
+.excl-item__left{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+.excl-item__left span{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.excl-popover__foot{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #EEE;
+}
+.excl-popover__summary{
+  font-size: 12px;
+  color: #666;
+}
+
+/* ===================== template list selector ===================== */
+
+.tpl-item{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+  cursor:pointer; background:#fff;
+}
+.tpl-item:hover{ background:#f8fafc; }
+.tpl-item.is-selected{ outline:2px solid var(--brand-600); background:var(--brand-100); }
+.tpl-item__left{ display:flex; flex-direction:column; gap:2px; }
+.tpl-item__name{ font-weight:600; }
+.tpl-item__meta{ color:var(--muted); font-size:12px; }
+
+/* Inline label + control block for schedule rows */
+.inline-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* don't stack, sit in a row */
+}
+
+.inline-control label {
+  margin: 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.inline-control select,
+.inline-control input[type="number"],
+.inline-control input[type="text"] {
+  width: auto;
+  min-width: 90px;
+  height: 28px;
+  padding: 2px 6px;
+  font-size: 14px;
+}
+
+/* ===================== schedule row layout ===================== */
+.sched-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* left side = the controls (toggle + hour + day...) */
+.sched-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* right side = buttons */
+.sched-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* "Weekly" + toggle, "Monthly" + toggle */
+.sched-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 140px;
+}
+
+/* inline label + control pairs like (Send hour [dropdown]) */
+.inline-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.inline-control label {
+  margin: 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.inline-control select,
+.inline-control input[type="number"] {
+  width: auto;
+  min-width: 90px;
+  height: 28px;
+  padding: 2px 6px;
+  font-size: 14px;
+}
+
+/* make sure the yes/no pill toggle doesn't squash or overlap text */
+.sched-group-toggle .yn-toggle {
+  flex-shrink: 0;
+}
+

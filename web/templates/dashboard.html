@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% set title = "Dashboard · Invoice Chaser" %}
+{% set active = "dashboard" %}
+{% block content %}
+
+  <style>
+    /* Chart colors — follow branding variables */
+    :root{
+      --chart-bar: var(--brand-600);
+      --chart-line: var(--brand-700);
+      --chart-grid: var(--line);
+    }
+    #wk_chart svg .bar  { fill: var(--chart-bar); opacity: .9; }
+    #wk_chart svg .line { stroke: var(--chart-line); stroke-width: 2; fill: none; opacity: .9; }
+    #wk_chart svg .dot  { fill: var(--chart-line); }
+    #wk_chart svg .grid { stroke: var(--chart-grid); }
+  </style>
+
+  <div style="display:flex;align-items:center;gap:12px;">
+    <h1 style="margin:0;">Dashboard</h1>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+      <label for="dash_customer_filter" class="muted">View</label>
+      <select id="dash_customer_filter">
+        <option value="">All customers</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Weekly performance -->
+  <section class="panel" style="margin-top:12px;">
+    <div class="panel__head" style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;">
+      <h2 style="margin-right:auto;">Last 26 weeks</h2>
+
+      <!-- Metric toggle -->
+      <div class="chipbar" style="display:flex;gap:6px;">
+        <button class="chip is-active" data-metric="issued" id="wk_btn_issued">Issued (Invoices − Credits)</button>
+        <button class="chip" data-metric="received" id="wk_btn_received">Received (Cash in)</button>
+      </div>
+
+      <!-- Weeks controls -->
+      <div class="row" style="display:flex; gap:8px; align-items:center;">
+        <div id="wk_quick" class="btnset" style="display:flex;gap:6px;">
+          <button class="btn btn--ghost" data-wk="1">1w</button>
+          <button class="btn btn--ghost" data-wk="4">4w</button>
+          <button class="btn btn--ghost" data-wk="12">12w</button>
+          <button class="btn btn--ghost is-active" data-wk="26">26w</button>
+          <button class="btn btn--ghost" data-wk="52">52w</button>
+        </div>
+        <label class="muted" for="wk_input">or weeks</label>
+        <input id="wk_input" type="number" min="1" max="104" step="1" value="26" style="width:80px;">
+        <label class="muted" style="display:flex;align-items:center;gap:6px;margin-left:10px;">
+          <input id="wk_toggle_cnt" type="checkbox" checked>
+          Show invoice count
+        </label>
+      </div>
+    </div>
+
+    <div style="padding:12px;">
+      <!-- Chart -->
+      <div id="wk_chart" class="chart" style="width:100%;height:300px;position:relative;"></div>
+
+      <!-- KPIs under the chart -->
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:12px;">
+        <div class="kpi">
+          <div class="kpi__label">Period total</div>
+          <div class="kpi__value" id="wk_total">£0.00</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label">Avg invoice amount</div>
+          <div class="kpi__value" id="wk_avg_inv">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label">Avg invoices / week</div>
+          <div class="kpi__value" id="wk_avg_cnt">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Customers with balances -->
+  <section class="panel" style="margin-top:12px;">
+    <div class="panel__head">
+      <h2>Customers with balances</h2>
+      <div></div>
+    </div>
+    <div style="padding:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th style="text-align:right;">Total owed</th>
+            <th style="text-align:right;">Total due now</th>
+            <th style="text-align:right;">0–30 overdue</th>
+            <th style="text-align:right;">31–60 overdue</th>
+            <th style="text-align:right;">61–90 overdue</th>
+            <th style="text-align:right;">90+ overdue</th>
+          </tr>
+        </thead>
+        <tbody id="cust_rows"></tbody>
+        <tfoot id="cust_totals"></tfoot>
+      </table>
+      <div id="cust_rows_empty" class="empty" style="display:none;">No outstanding balances.</div>
+    </div>
+  </section>
+
+  <script src="/static/js/dashboard.js?v=2025-10-23-1"></script>
+{% endblock %}

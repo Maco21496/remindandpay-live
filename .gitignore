@@ -1,0 +1,40 @@
+﻿# ---- Secrets / env ----
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# ---- Node / frontend ----
+node_modules/
+
+# ---- IDE ----
+.vscode/
+
+# ---- Logs / temp ----
+*.log
+temp.txt
+*.tmp
+.DS_Store
+Thumbs.db
+
+# ---- Reports / generated outputs ----
+reports/
+
+# ---- Local audit / helper outputs (do not commit) ----
+possible_secrets_files.txt
+repo_inventory.txt
+mrbeezgrid_full_file_read.py
+check_postmark_env_all.ps1
+Inspect-Service-Deep.ps1
+List-NSSM-Services.ps1
+

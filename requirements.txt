@@ -1,0 +1,30 @@
+﻿# --- Web/API core (Pydantic v1 line) ---
+fastapi==0.103.2           # FastAPI version still on Pydantic v1
+pydantic==1.10.13          # Your code uses v1-style models
+uvicorn[standard]==0.23.2
+
+# --- DB / ORM ---
+SQLAlchemy==2.0.23
+PyMySQL==1.1.0
+
+# --- Templates / uploads / utils ---
+Jinja2==3.1.4
+python-multipart==0.0.9
+python-dotenv==1.0.1
+requests==2.32.3
+email-validator==2.1.1     # Required for pydantic.EmailStr
+tzdata==2025.2
+
+# --- PDF rendering (wkhtmltopdf via pdfkit) ---
+pdfkit==1.0.0
+
+
+# --- Auth / hashing (you’re using argon2 with passlib) ---
+passlib[argon2]==1.7.4
+argon2-cffi==23.1.0
+
+# --- XLSX import ---
+openpyxl==3.1.5
+
+# --- Optional (only if you actually use it) ---
+# stripe==9.13.0

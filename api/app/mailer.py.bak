@@ -1,0 +1,361 @@
+# app/mailer.py
+import requests
+from typing import Optional, Tuple, Dict, Any, List
+from html import escape
+from base64 import b64encode
+import os
+
+from sqlalchemy.orm import Session
+from sqlalchemy import text as sqltext
+from .shared import templates
+from .models import AppSettings, Customer
+from .routers.statements import compute_statement_summary
+import logging
+
+log = logging.getLogger("mailer")
+
+POSTMARK_SEND_URL = "https://api.postmarkapp.com/email"
+
+
+class MailResult:
+    """Uniform result for any mail send."""
+    def __init__(self, ok: bool, message_id: Optional[str] = None,
+                 error: Optional[str] = None, code: Optional[int] = None,
+                 permanent: bool = False):
+        self.ok = ok
+        self.message_id = message_id
+        self.error = error
+        self.code = code              # provider error code (e.g. 412 for Postmark sandbox)
+        self.permanent = permanent    # True = don’t retry
+
+    def __repr__(self) -> str:
+        return f"MailResult(ok={self.ok}, id={self.message_id!r}, code={self.code!r}, permanent={self.permanent}, error={self.error!r})"
+
+
+def send_via_postmark(
+    server_token: str,
+    From: str,
+    To: str,
+    Subject: str,
+    HtmlBody: str,
+    TextBody: str = "",
+    attachments: Optional[List[Dict[str, str]]] = None,
+
+) -> MailResult:
+    """Low-level Postmark sender."""
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Postmark-Server-Token": server_token,
+    }
+    payload = {
+        "From": From,
+        "To": To,
+        "Subject": Subject,
+        "HtmlBody": HtmlBody,
+        "TextBody": TextBody or " ",
+        "MessageStream": "outbound",
+    }
+    if attachments:
+        payload["Attachments"] = attachments
+    try:
+        r = requests.post(POSTMARK_SEND_URL, headers=headers, json=payload, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            return MailResult(True, message_id=str(data.get("MessageID")))
+        # parse Postmark error body when present
+        code = None
+        permanent = False
+        msg_text = r.text
+        try:
+            jd = r.json()
+            code = int(jd.get("ErrorCode")) if "ErrorCode" in jd else None
+            msg_text = jd.get("Message") or msg_text
+            # Permanent errors we shouldn’t retry
+            # 412 = sandbox/sender restriction, 300 = invalid token, 405 = inactive recipient, 406 = blocked/inactive
+            if code in (412, 300, 405, 406):
+                permanent = True
+            # For other 4xx (except 429 rate limit), treat as permanent by default:
+            if 400 <= r.status_code < 500 and r.status_code != 429:
+                permanent = True
+        except Exception:
+            # keep defaults if we can’t parse JSON
+            if 400 <= r.status_code < 500 and r.status_code != 429:
+                permanent = True
+
+        return MailResult(False, error=f"{r.status_code}: {msg_text}", code=code, permanent=permanent)
+    except Exception as e:
+        # network/timeout: transient
+        return MailResult(False, error=str(e), code=None, permanent=False)
+
+# ---------------------------
+# Statement email composition
+# ---------------------------
+
+def _render_statement_pdf_from_html(html: str) -> Optional[bytes]:
+    """
+    HTML -> PDF using wkhtmltopdf (via pdfkit). Returns PDF bytes or None on failure.
+    Configure binary via env WKHTMLTOPDF_PATH or ensure it's on PATH.
+    """
+    try:
+        import pdfkit
+        exe = os.getenv("WKHTMLTOPDF_PATH")  # optional explicit path to wkhtmltopdf.exe
+        cfg = pdfkit.configuration(wkhtmltopdf=exe) if exe else None
+        pdf_bytes = pdfkit.from_string(html, False, configuration=cfg)
+        if isinstance(pdf_bytes, (bytes, bytearray)) and pdf_bytes:
+            log.info("Rendered PDF via wkhtmltopdf")
+            return bytes(pdf_bytes)
+    except Exception as e:
+        log.warning("wkhtmltopdf PDF render failed: %s", e)
+    return None
+
+
+def _render_statement_pdf_html(
+    db: Session,
+    user_id: int,
+    customer_id: int,
+    date_to: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Build a minimal, self-contained HTML for the customer's statement suitable for PDF rendering.
+    Returns the HTML string or None if data can't be prepared.
+    """
+    try:
+        # Load org branding (optional)
+        org = db.query(AppSettings).filter(AppSettings.user_id == user_id).first()
+        org_addr = getattr(org, "org_address", None) or ""
+        org_logo = getattr(org, "org_logo_url", None) or None
+
+        cust = db.query(Customer).filter(Customer.id == customer_id, Customer.user_id == user_id).first()
+        if not cust:
+            return None
+
+        # Compute summary data (pure helper shared with API endpoint)
+        summary = compute_statement_summary(
+            db=db,
+            user_id=user_id,
+            customer_id=customer_id,
+            date_to=date_to,
+            include_after_payments=False,
+        )
+
+        # Render using a dedicated PDF-friendly template (no JS)
+        tpl = templates.env.get_template("pdf/statement_pdf.html")
+        html = tpl.render(
+            org_address=org_addr,
+            org_logo_url=org_logo,
+            customer=cust,
+            summary=summary,
+        )
+        return html
+    except Exception:
+        return None
+
+
+
+def compose_statement_html_text(
+    message: str,
+    customer_name: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    statement_url: Optional[str],
+) -> Tuple[str, str]:
+    """Return (html, text) for a statement email."""
+    safe_msg_html = escape(message or "").replace("\n", "<br>")
+
+    date_html = ""
+    if date_from or date_to:
+        df = date_from or "–"
+        dt = date_to or "–"
+        date_html = f"<p><strong>Period:</strong> {df} – {dt}</p>"
+
+    link_html = ""
+    if statement_url:
+        link_html = f'<p><a href="{statement_url}" target="_blank">View your statement</a></p>'
+
+    html_parts = [
+        '<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;',
+        'font-size:14px;color:#111;">',
+        f"<p>{safe_msg_html}</p>",
+        date_html,
+        link_html,
+        f'<p style="color:#666;margin-top:16px;">Sent for <strong>{escape(customer_name or "Customer")}</strong>.</p>',
+        "</div>",
+    ]
+    html = "".join(html_parts)
+
+    text_lines = [message or ""]
+    if date_from or date_to:
+        text_lines.append(f"")
+        text_lines.append(f"Period: {date_from or '-'} – {date_to or '-'}")
+    if statement_url:
+        text_lines.append(f"")
+        text_lines.append(f"View your statement: {statement_url}")
+    text = "\n".join(text_lines)
+
+    return html, text
+
+
+def send_statement_for_user(
+    db: Session,
+    user_id: int,
+    to_email: str,
+    subject: str,
+    message: str,
+    payload_json: Optional[Dict[str, Any]],
+    customer_name: Optional[str],
+    attach_pdf: bool = True,                  # <--- NEW: opt-in to attach a PDF
+) -> MailResult:
+    """
+    High-level helper used by the worker (and reusable elsewhere).
+    Looks up the user's email settings, composes the statement email, and sends via Postmark.
+    If attach_pdf=True and statement HTML is available, a PDF is rendered in-memory and attached.
+    """
+    row = db.execute(
+        sqltext(
+            """
+            SELECT default_from_name, default_from_email, postmark_server_token
+              FROM account_email_settings
+             WHERE user_id = :uid
+             LIMIT 1
+            """
+        ),
+        {"uid": user_id},
+    ).first()
+
+    if not row or not row.postmark_server_token:
+        return MailResult(False, error="Email settings not configured for this account")
+
+    from_name = (row.default_from_name or "Invoice Chaser").strip()
+    from_email = (row.default_from_email or "no-reply@example.com").strip()
+    from_addr = f"{from_name} <{from_email}>"
+
+    p = payload_json or {}
+    # Compose the lightweight email body (still useful even when attaching a PDF)
+    html, text = compose_statement_html_text(
+        message=message,
+        customer_name=customer_name or "Customer",
+        date_from=p.get("date_from"),
+        date_to=p.get("date_to"),
+        statement_url=p.get("statement_url"),
+    )
+
+    attachments = None
+
+    if attach_pdf:
+        # Prefer raw HTML supplied in payload_json (most reliable / no auth / no scraping).
+        statement_html: Optional[str] = p.get("statement_html")
+
+        # Optional: if you only have a URL and it's publicly reachable, you can fetch it.
+        # (If it's behind auth, this will 403/401 — better to pass 'statement_html' instead.)
+        # Prefer server-side rendering if we have ids (more reliable than fetching a protected URL)
+        if not statement_html and p.get("customer_id"):
+            statement_html = _render_statement_pdf_html(
+                db=db,
+                user_id=user_id,
+                customer_id=int(p.get("customer_id")),
+                date_to=p.get("date_to"),
+            )
+
+        # Last resort: try fetching a public URL if provided
+        if not statement_html and p.get("statement_url"):
+            try:
+                resp = requests.get(p["statement_url"], timeout=10)
+                if resp.ok and resp.text:
+                    statement_html = resp.text
+            except Exception:
+                pass  # silently fall back to no attachment
+
+        if statement_html:
+            pdf_bytes = _render_statement_pdf_from_html(statement_html)
+            if pdf_bytes:
+                # Build Postmark attachments array
+                filename = p.get("pdf_filename") or f"Statement-{(customer_name or 'Customer').strip().replace(' ', '_')}.pdf"
+                attachments = [{
+                    "Name": filename,
+                    "Content": b64encode(pdf_bytes).decode("ascii"),
+                    "ContentType": "application/pdf",
+                    # "ContentID": "statement"  # optional
+                }]
+                log.info("Generated PDF attachment for user_id=%s customer_id=%s filename=%s", user_id, p.get("customer_id"), filename)
+            else:
+                log.warning("PDF attachment skipped (render returned None). Check wkhtmltopdf installation and WKHTMLTOPDF_PATH.")
+        else:
+            log.info("No statement HTML available for PDF attachment (customer_id=%s, url_present=%s)",
+                     p.get("customer_id"), bool(p.get("statement_url")))
+
+    return send_via_postmark(
+        server_token=row.postmark_server_token,
+        From=from_addr,
+        To=to_email,
+        Subject=subject,
+        HtmlBody=html,
+        TextBody=text,
+        attachments=attachments,   # <--- NEW
+    )
+# --------------------------------
+# Chasing email (simple template)
+# --------------------------------
+
+def _html_to_text_fallback(html: str) -> str:
+    """
+    Very simple HTML -> text fallback (no external deps).
+    Keeps newlines for <br> and block tags, strips the rest.
+    """
+    import re
+    s = html or ""
+    # normalise common line breaks
+    s = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*p\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*div\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*li\s*>", "\n", s)
+    # strip remaining tags
+    s = re.sub(r"<[^>]+>", "", s)
+    # collapse excessive blank lines
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s or " "
+
+
+def send_chasing_for_user(
+    db: Session,
+    user_id: int,
+    to_email: str,
+    subject: str,
+    html_body: str,
+) -> MailResult:
+    """
+    Send a chasing email:
+    - Uses the HTML body from the job exactly as provided (no statement extras).
+    - Builds a simple text fallback from the HTML.
+    - Uses the user's From name/email and Postmark token from account_email_settings.
+    """
+    row = db.execute(
+        sqltext(
+            """
+            SELECT default_from_name, default_from_email, postmark_server_token
+              FROM account_email_settings
+             WHERE user_id = :uid
+             LIMIT 1
+            """
+        ),
+        {"uid": user_id},
+    ).first()
+
+    if not row or not row.postmark_server_token:
+        return MailResult(False, error="Email settings not configured for this account")
+
+    from_name = (row.default_from_name or "Invoice Chaser").strip()
+    from_email = (row.default_from_email or "no-reply@example.com").strip()
+    from_addr = f"{from_name} <{from_email}>"
+
+    text_body = _html_to_text_fallback(html_body or "")
+
+    return send_via_postmark(
+        server_token=row.postmark_server_token,
+        From=from_addr,
+        To=to_email,
+        Subject=subject or "",
+        HtmlBody=html_body or "",
+        TextBody=text_body,
+    )
+

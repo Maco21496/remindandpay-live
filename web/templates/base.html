@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title or "Invoice Chaser" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- PRE-HYDRATION THEME: run before CSS loads so there's no flash of wrong color -->
+  <script>
+    (function(){
+      try {
+        var html  = document.documentElement;
+        var theme = localStorage.getItem('ic_theme') || 'default';
+        var brand = localStorage.getItem('ic_brand_color') || '';
+
+        function darken(hex, amt) {
+          var n = parseInt(hex.slice(1),16);
+          var r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+          r=Math.max(0, r-amt);
+          g=Math.max(0, g-amt);
+          b=Math.max(0, b-amt);
+          return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+        }
+
+        if (theme === 'custom') {
+          // Custom mode:
+          //  - no data-theme
+          //  - inject CSS vars for brand colors
+          html.removeAttribute('data-theme');
+
+          if (/^#[0-9A-Fa-f]{6}$/.test(brand)) {
+            html.style.setProperty('--brand-600', brand);
+            html.style.setProperty('--brand-700', darken(brand, 24));
+          }
+        } else {
+          // Named theme mode:
+          //  - set data-theme to "teal", "rose", "slate", etc.
+          //  - clear any stale custom overrides
+          if (!theme || theme === 'default') {
+            html.removeAttribute('data-theme');
+          } else {
+            html.setAttribute('data-theme', theme);
+          }
+
+          html.style.removeProperty('--brand-600');
+          html.style.removeProperty('--brand-700');
+        }
+      } catch(e){}
+    })();
+  </script>
+
+  <!-- Core styles -->
+  <link href="/static/css/app.css" rel="stylesheet" />
+  <link href="/static/css/branding.css" rel="stylesheet" />
+  <link href="/static/css/modal_wizards.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/tabbar.css">
+
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+  <!-- Top strip / main nav -->
+  <div class="topbar">
+    <div class="topbar__left">
+      <a href="/dashboard" class="brand">Invoice Chaser</a>
+
+      <nav class="topbar__nav">
+        <a href="/dashboard"
+           class="navlink {{ 'active' if active=='dashboard' else '' }}">Dashboard</a>
+        <a href="/invoices"
+           class="navlink {{ 'active' if active=='invoices' else '' }}">Invoices</a>
+        <a href="/customers"
+           class="navlink {{ 'active' if active=='customers' else '' }}">Customers</a>
+        <a href="/schedule"
+           class="navlink {{ 'active' if active=='schedule' else '' }}">Schedule</a>
+        <a href="/message_templates"
+           class="navlink {{ 'active' if active=='message_templates' else '' }}">Message templates</a>
+      </nav>
+    </div>
+
+    <div class="topbar__right">
+      <a href="/support" class="toplink">Support</a>
+      <a href="/settings" class="toplink">Settings</a>
+
+      <div class="userbox">
+        <button id="user_btn" class="userbtn" aria-haspopup="menu" aria-expanded="false">
+          <span id="user_initials" class="userbtn__initials">DB</span>
+          <svg class="caret" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 10l5 5 5-5z"/>
+          </svg>
+        </button>
+
+        <div id="user_menu" class="usermenu" role="menu" hidden>
+          <form id="logout_form" action="/auth/logout" method="post" style="margin:0;">
+            <button type="submit" class="menu__item" role="menuitem">Log out</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Customer sub-tabs strip (Schedule / Customers pages etc populate this dynamically) -->
+  <div id="customer-tabbar" class="tabbar"></div>
+
+  <!-- Global helpers -->
+  <script src="/static/js/uk_date.js"></script>
+  <script src="/static/js/app_currency.js"></script>
+
+  <!-- Flatpickr datepicker -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+  <!-- UI helpers -->
+  <script src="/static/js/actions_bar.js"></script>
+  <script src="/static/js/customerTabs.js"></script>
+  <script src="/static/js/user_settings.js"></script>
+
+  <!-- Global boot script:
+       - loads /api/settings
+       - applies correct theme/brand (server is source of truth)
+       - sets date/time locale
+       - initialises date pickers
+       - stores currency etc.
+  -->
+  <script>
+    (async () => {
+      // 1. Fetch settings from server (authoritative)
+      let s = { date_locale: "en-GB", time_format: "24h" };
+      try {
+        const r = await fetch("/api/settings");
+        if (r.ok) s = await r.json();
+      } catch {}
+
+      // Expose for any other modules that rely on it
+      window.__APP_SETTINGS__ = s;
+
+      // 2. Apply locale + time format to helpers
+      if (window.AppDate) {
+        AppDate.setLocale(s.date_locale || "en-GB");
+        AppDate.setTimeFormat(s.time_format || "24h");
+      }
+      const loc = s.date_locale || "en-GB";
+      document.documentElement.setAttribute("lang", loc);
+
+      // 3. Init/attach flatpickr date pickers, making sure dropdown shows above modals
+      function initDatePickers(root = document) {
+        const altFormat = (loc === "en-US") ? "m/d/Y" : "d/m/Y";
+        root.querySelectorAll('input[type="date"]').forEach(el => {
+          if (el._flatpickr) return;
+          const container = el.closest('dialog') || document.body;
+          flatpickr(el, {
+            appendTo: container,
+            dateFormat: "Y-m-d",
+            altInput: true,
+            altFormat: altFormat,
+            allowInput: true,
+            disableMobile: true
+          });
+        });
+      }
+      initDatePickers();
+      document.addEventListener("DOMContentLoaded", () => initDatePickers());
+      window.__initDatePickers = initDatePickers;
+
+      // 4. THEME / BRANDING
+      // server values win. if missing, fallback to localStorage,
+      // then write back to localStorage so next page load knows.
+      const html = document.documentElement;
+
+      function ls(key) {
+        try { return localStorage.getItem(key); } catch { return null; }
+      }
+
+      const savedTheme =
+        s.theme ||
+        ls('ic_theme') ||
+        'default';
+
+      const savedBrand =
+        (s.brand_color && /^#[0-9A-Fa-f]{6}$/.test(s.brand_color))
+          ? s.brand_color
+          : (ls('ic_brand_color') || '');
+
+      function darken(hex, amt) {
+        const n = parseInt(hex.slice(1),16);
+        let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+        r=Math.max(0, r-amt);
+        g=Math.max(0, g-amt);
+        b=Math.max(0, b-amt);
+        return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+      }
+
+      if (savedTheme === 'custom') {
+        // Custom brand mode:
+        // - make sure data-theme is removed so branding.css doesn't override us
+        // - inject inline vars for brand color
+        html.removeAttribute('data-theme');
+
+        if (/^#[0-9A-Fa-f]{6}$/.test(savedBrand)) {
+          html.style.setProperty('--brand-600', savedBrand);
+          html.style.setProperty('--brand-700', darken(savedBrand, 24));
+        }
+      } else {
+        // Named theme mode:
+        // - apply data-theme="slate"/"rose"/etc unless default
+        // - clear any old inline overrides from custom mode
+        if (!savedTheme || savedTheme === 'default') {
+          html.removeAttribute('data-theme');
+        } else {
+          html.setAttribute('data-theme', savedTheme);
+        }
+
+        html.style.removeProperty('--brand-600');
+        html.style.removeProperty('--brand-700');
+      }
+
+      // persist to localStorage so the <head> pre-hydration code knows what to paint next page
+      try { localStorage.setItem('ic_theme', savedTheme || 'default'); } catch {}
+      if (savedTheme === 'custom' && savedBrand) {
+        try { localStorage.setItem('ic_brand_color', savedBrand); } catch {}
+      }
+
+      // 5. Persist currency for AppCurrency etc
+      try {
+        if (s.currency) localStorage.setItem('ic_currency', s.currency);
+      } catch {}
+    })();
+  </script>
+
+  <!-- Page content injected by child templates -->
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+</body>
+</html>

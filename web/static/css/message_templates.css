@@ -1,0 +1,162 @@
+/* FINAL VERSION OF /static/css/message_templates.css */
+
+/* ---- Table layout ---- */
+
+.msg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #0f172a;
+}
+
+.msg-table thead th {
+  font-weight: 500;
+  font-size: 12px;
+  color: #64748b;
+  text-transform: none;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px;
+}
+
+.msg-table tbody .msg-row td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+  background:#fff;
+}
+
+/* first column: label + pill + subject line */
+.msg-col-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.msg-col-label {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.msg-col-subject {
+  font-size: 12px;
+  color: #475569;
+  line-height:1.4;
+  word-break: break-word;
+}
+
+/* other cols */
+.msg-col-when,
+.msg-col-status,
+.msg-col-updated {
+  font-size: 12px;
+  color: #0f172a;
+  line-height:1.4;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.msg-col-edit {
+  white-space: nowrap;
+}
+
+/* ---- Pills (Default / Custom) ---- */
+
+.msg-pill {
+  display:inline-block;
+  font-size:11px;
+  line-height:1.2;
+  border-radius:999px;
+  border:1px solid transparent;
+  padding:2px 6px;
+  font-weight:500;
+}
+
+.msg-pill--default {
+  /* default cycle (gentle/firm/aggressive) */
+  background: var(--brand-100, #f1f5f9);
+  border-color: var(--brand-200, #cbd5e1);
+  color: var(--brand-700, #0f172a);
+}
+
+.msg-pill--custom {
+  background: #fff7ed;           /* warm pale (like amber-50) */
+  border-color: #fdba74;         /* amber-300 */
+  color: #c2410c;                /* amber-700 / orange-700 vibe */
+}
+
+/* ---- Buttons in the table / editor ---- */
+
+.msg-btn {
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 6px 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: #fff;
+  color: #0f172a;
+}
+.msg-btn[disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.msg-btn--primary {
+  background: var(--brand-600, #6366f1);
+  color: #fff;
+  border-color: var(--brand-600, #6366f1);
+}
+.msg-btn--ghost {
+  background:#fff;
+  border-color:#cbd5e1;
+  color:#0f172a;
+}
+.msg-btn--sm {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.msg-btn--xs {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* ---- Inline editor card ---- */
+
+.msg-editor-body {
+  font-size:13px;
+  line-height:1.4;
+  color:#0f172a;
+}
+
+.msg-field {
+  margin-bottom:12px;
+}
+.msg-label {
+  font-size:12px;
+  font-weight:500;
+  color:#0f172a;
+  line-height:1.3;
+  display:block;
+  margin-bottom:4px;
+}
+
+.msg-input {
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid #cbd5e1;
+  background:#fff;
+  font-size:13px;
+  line-height:1.4;
+  border-radius:6px;
+  padding:7px 8px;
+  color:#0f172a;
+}
+
+.msg-editor-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:8px;
+}

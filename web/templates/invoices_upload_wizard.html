@@ -1,0 +1,24 @@
+<!-- Upload wizard modal -->
+<dialog id="upload_wizard" class="modal modal--wide">
+  <form method="dialog" class="modal__card">
+    <header class="modal__head">
+      <h3 id="wiz_title">Upload invoices</h3>
+      <button type="submit" class="modal__close" aria-label="Close">✕</button>
+    </header>
+
+    <ol class="wizard_steps">
+      <li id="st1" class="is-active">1. File</li>
+      <li id="st2">2. Mapping</li>
+      <li id="st3">3. Options</li>
+      <li id="st4">4. Review</li>
+    </ol>
+
+    <section id="wiz_body" class="wizard_body"></section>
+
+    <footer class="modal__foot">
+      <button type="button" id="wiz_back" class="btn btn--ghost">Back</button>
+      <div style="flex:1"></div>
+      <button type="button" id="wiz_next" class="btn">Next</button>
+    </footer>
+  </form>
+</dialog>

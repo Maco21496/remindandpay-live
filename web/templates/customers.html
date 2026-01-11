@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set title = "Customers · Invoice Chaser" %}
+{% set active = "customers" %}
+{% block content %}
+
+<h1>Customers</h1>
+
+<section class="panel" style="margin-top:12px;">
+  <div class="panel__head">
+    <div style="display:flex;align-items:center;gap:8px">
+      <input id="cust-search" placeholder="Search customers..." style="height:36px;padding:0 10px;max-width:280px;">
+    </div>
+    <div>
+      <button id="btn_add_customer" class="btn">Add customer</button>
+    </div>
+  </div>
+
+  <div style="padding:12px;">
+    <table>
+      <thead>
+        <tr>
+          <th style="min-width:220px;">Name</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Terms</th>
+          <th>Created</th>
+          <th style="width:110px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="customers-rows"></tbody>
+    </table>
+    <div id="customers-empty" class="empty" style="display:none;">No customers yet.</div>
+  </div>
+</section>
+
+{# reuse the same editor modal used on the customer dashboard #}
+{% include "customer_editor.html" %}
+
+<script src="/static/js/customers.js"></script>
+<script src="/static/js/customer_editor.js"></script>
+{% endblock %}

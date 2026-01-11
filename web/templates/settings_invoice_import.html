@@ -1,0 +1,725 @@
+{% extends "base.html" %}
+{% set title = "Invoice import — Remind & Pay" %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/settings.css">
+
+<h1>Settings</h1>
+
+<nav id="set_tabs" class="tabbar" style="margin:0 0 12px 0;">
+  <button class="tab" data-tab="app">App settings</button>
+  <button class="tab" data-tab="email">Email settings</button>
+  <button class="tab is-active" data-tab="import">Invoice import</button>
+  <button class="tab" data-tab="restore">Restore defaults</button>
+  <div style="flex:1"></div>
+</nav>
+
+<section class="panel panel--wide" style="margin-top:12px;">
+  <div class="panel__head">
+    <h2>Invoice import settings</h2>
+
+    <!-- NEW inner tabs for this page -->
+    <nav id="ii_subtabs" class="tabbar" style="margin-top:8px;">
+      <button class="tab is-active" data-subtab="settings">Settings</button>
+      <button class="tab" data-subtab="pdf">PDF invoices</button>
+      <button class="tab" data-subtab="html">HTML invoices</button>
+    </nav>
+  </div>
+
+  <div class="content" style="padding:12px;">
+
+<!-- FINAL VERSION OF ii_subtab_settings IN templates/settings_invoice_import.html -->
+<div id="ii_subtab_settings" class="ii-subtab-section" style="margin-top:4px;">
+  <div class="subpanel" style="padding:16px 18px;">
+    <div style="display:flex; flex-direction:column; gap:18px;">
+
+      <!-- ROW: Import address -->
+      <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="width:220px; min-width:200px;">
+          <div style="font-weight:600;">Import address</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+            <button type="button"
+                    class="chip"
+                    data-help-toggle="ii_help_address"
+                    style="padding:0 6px; height:20px; font-size:11px; border-radius:999px;">
+              i
+            </button>
+          </div>
+          <p id="ii_help_address"
+             class="muted"
+             style="margin:4px 0 0; font-size:12px; display:none;">
+            Forward invoice emails to this address.
+          </p>
+        </div>
+
+        <div style="flex:1; min-width:260px; display:flex; gap:8px; align-items:center;">
+          <input id="ii_address"
+                 readonly
+                 style="height:32px; padding:0 8px; flex:0 0 auto; width:520px; max-width:100%;">
+          <button id="ii_copy" class="btn btn--subtle" type="button">Copy</button>
+        </div>
+      </div>
+
+      <!-- ROW: Reader -->
+      <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="width:220px; min-width:200px;">
+          <div style="font-weight:600;">Reader</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+            <button type="button"
+                    class="chip"
+                    data-help-toggle="ii_help_reader"
+                    style="padding:0 6px; height:20px; font-size:11px; border-radius:999px;">
+              i
+            </button>
+          </div>
+          <p id="ii_help_reader"
+             class="muted"
+             style="margin:4px 0 0; font-size:12px; display:none;">
+            Choose whether we read PDF attachments or the email HTML body.
+          </p>
+        </div>
+
+        <div style="flex:1; min-width:260px;">
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <label class="chip">
+              <input type="radio" name="ii_reader" value="pdf" checked>
+              <span style="margin-left:6px;">PDF (attachments)</span>
+            </label>
+            <label class="chip">
+              <input type="radio" name="ii_reader" value="html">
+              <span style="margin-left:6px;">Email HTML body</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW: Active template -->
+      <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="width:220px; min-width:200px;">
+          <div style="font-weight:600;">Active template</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+            <button type="button"
+                    class="chip"
+                    data-help-toggle="ii_help_template"
+                    style="padding:0 6px; height:20px; font-size:11px; border-radius:999px;">
+              i
+            </button>
+          </div>
+          <p id="ii_help_template"
+             class="muted"
+             style="margin:4px 0 0; font-size:12px; display:none;">
+            Pick which mapping template to use for imported invoices.
+          </p>
+        </div>
+
+        <div style="flex:1; min-width:260px;">
+          <select id="ii_block_template_name"
+                  style="height:32px; padding:0 8px; min-width:220px;">
+            <option value="">(none)</option>
+          </select>
+          <div id="ii_msg" class="muted" style="font-size:12px; margin-top:4px;"></div>
+        </div>
+      </div>
+
+      <!-- ROW: Invoice import ON/OFF + status (moved to bottom) -->
+      <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; border-top:1px solid #e5e7eb; padding-top:12px; margin-top:4px;">
+        <div style="width:220px; min-width:200px;">
+          <div style="font-weight:600;">Invoice import</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+            <button type="button"
+                    class="chip"
+                    data-help-toggle="ii_help_import"
+                    style="padding:0 6px; height:20px; font-size:11px; border-radius:999px;">
+              i
+            </button>
+          </div>
+          <p id="ii_help_import"
+             class="muted"
+             style="margin:4px 0 0; font-size:12px; display:none;">
+            Turn on automatic processing of emails sent to your import address.
+          </p>
+        </div>
+
+        <div style="flex:1; min-width:260px; display:flex; flex-direction:column; gap:4px;">
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <!-- NOTE: still a checkbox; styling to match your green switch
+                 needs the existing switch markup/CSS from the statements page. -->
+            <label class="chip">
+              <input type="checkbox" id="ii_active">
+              <span style="margin-left:6px;">Enable invoice import</span>
+            </label>
+
+            <span id="ii_status" class="chip muted">Not configured</span>
+          </div>
+          <span id="ii_last_seen" class="muted" style="font-size:12px;"></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+    <!-- SUBTAB: PDF INVOICES (existing visual mapper UI) -->
+    <div id="ii_subtab_pdf" class="ii-subtab-section" style="margin-top:4px; display:none;">
+
+      <!-- MAIN BODY: left = template name + list, right = visual mapper -->
+      <div style="display:grid; grid-template-columns:260px 1fr; gap:16px; align-items:flex-start;">
+
+        <!-- LEFT COLUMN: template name + templates list -->
+        <div class="subpanel" style="padding:10px;">
+          <div style="margin-bottom:8px;">
+            <div style="font-weight:600;">Invoice Templates</div>
+            <div class="muted" style="font-size:12px;"></div>
+          </div>
+
+          <!-- Template name (FULL WIDTH ABOVE BUTTON) -->
+          <div class="field" style="margin-bottom:6px;">
+            <label for="bm_template_name"
+                   style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+              Template name
+            </label>
+            <input id="bm_template_name"
+                   type="text"
+                   placeholder="e.g. standard invoice"
+                   style="height:32px; padding:0 8px; width:100%;">
+          </div>
+
+          <!-- Create template button (FULL WIDTH) -->
+          <button id="ii_new_template"
+                  class="btn"
+                  type="button"
+                  style="width:100%; margin-bottom:8px;">
+            Create template
+          </button>
+
+          <!-- Templates list (populated from bm_template_selector) -->
+          <div id="ii_template_list"
+               style="margin-top:4px; border:1px solid #e5e7eb; border-radius:6px; background:#fff; max-height:420px; overflow-y:auto;">
+            <!-- Filled by inline script -->
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: visual mapper + PDF canvas -->
+        <div class="subpanel">
+
+          <h3 style="margin:0 0 8px 0; font-size:16px;">Visual mapper</h3>
+
+          <p class="muted" style="margin-top:0;">
+            We&rsquo;ll guide you through mapping Invoice number, Invoice date,
+            Amount due, optional Due date and then customer mapping. Use the PDF
+            preview on the right to click labels and confirm values.
+          </p>
+
+          <!-- PDF loader row -->
+          <div class="vm-topbar" style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+            <input id="bm_pdf_file" type="file" accept="application/pdf" style="height:32px;">
+            <label class="chip">
+              Page
+              <input id="bm_page"
+                     type="number"
+                     value="1"
+                     min="1"
+                     style="height:28px; width:70px; margin-left:6px;">
+            </label>
+            <button id="bm_load_blocks" class="btn" type="button">Load lines</button>
+            <span id="bm_msg" class="muted" style="flex:1; min-width:120px;"></span>
+          </div>
+
+          <!-- Mapper & canvas split -->
+          <div class="vm-grid" style="display:grid; grid-template-columns:minmax(220px, 320px) 1fr; gap:12px; align-items:flex-start;">
+
+            <!-- LEFT: Steps + field list -->
+            <div class="vm-sidebar">
+
+              <!-- STEP 1 -->
+              <div id="vm_fields_section">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                  <div style="font-weight:600;">Step 1 — Choose field</div>
+                  <span class="muted" style="font-size:12px;">We&rsquo;ll move you along the list</span>
+                </div>
+
+                <div class="vm-fieldlist">
+                  <!-- 1. Invoice number -->
+                  <label class="vm-pill vm-pill--row">
+                    <span class="vm-pill-main">
+                      <input type="radio" name="bm_field_choice" value="invoice_number" checked>
+                      <span id="bm_value_invoice_number" class="vm-text">1. Invoice number | —</span>
+                    </span>
+                    <span id="bm_status_invoice_number" class="vm-dot">●</span>
+                  </label>
+
+                  <!-- 2. Invoice date -->
+                  <label class="vm-pill vm-pill--row">
+                    <span class="vm-pill-main">
+                      <input type="radio" name="bm_field_choice" value="issue_date">
+                      <span id="bm_value_issue_date" class="vm-text">2. Invoice date | —</span>
+                    </span>
+                    <span id="bm_status_issue_date" class="vm-dot">●</span>
+                  </label>
+
+                  <!-- 3. Amount due -->
+                  <label class="vm-pill vm-pill--row">
+                    <span class="vm-pill-main">
+                      <input type="radio" name="bm_field_choice" value="amount_due">
+                      <span id="bm_value_amount_due" class="vm-text">3. Amount due | —</span>
+                    </span>
+                    <span id="bm_status_amount_due" class="vm-dot">●</span>
+                  </label>
+
+                  <!-- 4. Customer mapping -->
+                  <label class="vm-pill vm-pill--row">
+                    <span class="vm-pill-main">
+                      <input type="radio" name="bm_field_choice" value="customer_map">
+                      <span id="bm_value_customer_map" class="vm-text">
+                        4. Customer mapping (name or email) | —</span>
+                    </span>
+                    <span id="bm_status_customer_map" class="vm-dot">●</span>
+                  </label>
+
+                  <!-- 5. Due date (optional) -->
+                  <label class="vm-pill vm-pill--row">
+                    <span class="vm-pill-main">
+                      <input type="radio" name="bm_field_choice" value="due_date">
+                      <span id="bm_value_due_date" class="vm-text">5. Due date (optional) | —</span>
+                    </span>
+                    <span id="bm_status_due_date" class="vm-dot">●</span>
+                  </label>
+                </div>
+
+                <!-- Customer “by” mode -->
+                <div id="bm_cust_by_row"
+                     class="field-row"
+                     style="gap:8px; margin-top:8px; align-items:center; display:none;">
+                  <span class="muted" style="font-size:13px;">Match customer by</span>
+                  <label class="chip">
+                    <input id="bm_cust_by_name" type="radio" name="bm_cust_by" value="name" checked>
+                    <span style="margin-left:6px;">Name</span>
+                  </label>
+                  <label class="chip">
+                    <input id="bm_cust_by_email" type="radio" name="bm_cust_by" value="email">
+                    <span style="margin-left:6px;">Email</span>
+                  </label>
+                </div>
+
+                <!-- Hidden select kept for JS compatibility -->
+                <select id="bm_field" style="display:none;">
+                  <option value="invoice_number" selected>invoice_number</option>
+                  <option value="issue_date">issue_date</option>
+                  <option value="amount_due">amount_due</option>
+                  <option value="customer_map">customer_map</option>
+                  <option value="due_date">due_date</option>
+                </select>
+              </div>
+
+              <!-- STEP 2 -->
+              <div id="bm_step2"
+                   style="border-top:1px solid #e5e7eb; padding-top:12px; margin-top:12px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin:0 0 4px;">
+                  <div style="font-weight:600;">Step 2 — Pick the label</div>
+                  <button id="bm_step2_help_btn"
+                          type="button"
+                          class="chip"
+                          style="padding:2px 8px; font-size:11px;">
+                    ?
+                  </button>
+                </div>
+                <p id="bm_step2_help"
+                   class="muted"
+                   style="margin:0 0 6px 0; font-size:12px; display:none;">
+                  Click once on the label that describes the current field on the PDF
+                  (for example <code>Invoice number:</code> or a customer name/email).
+                  We&rsquo;ll auto-fill the trigger text, or you can override it.
+                </p>
+
+                <div id="bm_step2_body" style="margin-top:4px; display:none;">
+                  <div class="field">
+                    <label for="bm_trigger_text"
+                           class="muted"
+                           style="display:block; margin-bottom:4px;">
+                      Trigger text
+                    </label>
+                    <input id="bm_trigger_text"
+                           placeholder="e.g. Invoice Date:"
+                           style="height:32px; padding:0 8px; width:100%;">
+                  </div>
+                </div>
+              </div>
+
+              <!-- STEP 3 -->
+              <div id="bm_step3"
+                   style="border-top:1px solid #e5e7eb; padding-top:12px; margin-top:12px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin:0 0 4px;">
+                  <div style="font-weight:600;">Step 3 — Where is the value?</div>
+                  <button id="bm_step3_help_btn"
+                          type="button"
+                          class="chip"
+                          style="padding:2px 8px; font-size:11px;">
+                    ?
+                  </button>
+                </div>
+                <p id="bm_step3_help"
+                   class="muted"
+                   style="margin:0 0 6px 0; font-size:12px; display:none;">
+                  Tell us where the value sits relative to the label you clicked, and
+                  optionally clean it up with a filter (amount/date/regex).
+                </p>
+
+                <div id="bm_step3_body" style="margin-top:4px; display:none;">
+                  <div class="field-row" style="gap:12px; margin-bottom:8px;">
+                    <label class="chip">
+                      <input id="bm_dir_right" type="radio" name="bm_dir" value="right" checked>
+                      <span style="margin-left:6px;">Right of trigger (same line / box)</span>
+                    </label>
+                    <label class="chip">
+                      <input id="bm_dir_below" type="radio" name="bm_dir" value="below">
+                      <span style="margin-left:6px;">Below trigger (next line)</span>
+                    </label>
+                  </div>
+
+                  <div class="vm-filter-row" style="margin-top:6px;">
+                    <select id="bm_filter" style="height:32px; padding:0 8px;">
+                      <option value="none">none</option>
+                      <option value="digits_only">digits_only</option>
+                      <option value="amount">amount</option>
+                      <option value="date">date</option>
+                      <option value="strip_parentheses">strip_parentheses</option>
+                      <option value="after_token">after_token</option>
+                      <option value="before_token">before_token</option>
+                      <option value="between_tokens">between_tokens</option>
+                      <option value="regex">regex</option>
+                    </select>
+                    <input id="bm_param_a"
+                           placeholder=""
+                           style="height:32px; width:160px; display:none;">
+                    <input id="bm_param_b"
+                           placeholder=""
+                           style="height:32px; width:100px; display:none;">
+                  </div>
+
+                  <div class="muted" style="margin:8px 0 4px;">
+                    <span id="bm_live_label">Current value</span>:
+                    <span id="bm_live" style="font-weight:600; color:#111827;"></span>
+                  </div>
+
+                  <div class="field-row" style="gap:8px; margin-top:6px;">
+                    <button id="bm_add_to_template" class="btn" type="button">
+                      Set value
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- RIGHT: PDF canvas -->
+            <div class="vm-canvaswrap"
+                 style="position:relative; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden; background:#f9fafb; min-height:320px;">
+              <canvas id="bm_canvas"></canvas>
+              <div id="bm_overlay"
+                   style="position:absolute; inset:0; pointer-events:auto;"></div>
+            </div>
+
+          </div>
+
+          <!-- Template JSON (testing) -->
+          <details style="margin-top:10px;">
+            <summary class="muted">Template JSON (testing)</summary>
+            <div class="field" style="margin-top:8px;">
+              <textarea id="bm_template"
+                        rows="10"
+                        style="width:100%; padding:8px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">{
+  "template_id": "user-invoice-template",
+  "page": 1,
+  "fields": [],
+  "customer_map": {
+    "by": "name",
+    "blocks": [],
+    "filter": { "type": "none" }
+  }
+}</textarea>
+            </div>
+            <div class="field-row" style="gap:8px; align-items:center; margin-top:6px;">
+              <button id="bm_extract" class="btn btn--subtle" type="button">
+                Extract with template (test)
+              </button>
+            </div>
+          </details>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- SUBTAB: HTML INVOICES (placeholder for future reader) -->
+    <div id="ii_subtab_html" class="ii-subtab-section" style="margin-top:4px; display:none;">
+      <div class="subpanel" style="padding:12px;">
+        <h3 style="margin-top:0; font-size:16px;">HTML invoice mapping</h3>
+        <p class="muted" style="margin-top:4px;">
+          HTML invoice mapping will go here. For now, invoice import will only use the PDF visual mapper.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<script src="/static/js/invoice_import_ui.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+  window.pdfjsLib = window.pdfjsLib || {};
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+</script>
+
+<script src="/static/js/block_mapper_ui.js"></script>
+
+<script>
+  (function(){
+    const tabs = document.getElementById('set_tabs');
+    if (!tabs) return;
+
+    tabs.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.tab;
+
+      if (which === 'import') {
+        return;
+      } else if (which === 'app') {
+        window.location.href = '/settings';
+      } else if (which === 'email') {
+        window.location.href = '/settings';
+      } else if (which === 'restore') {
+        window.location.href = '/settings';
+      }
+    });
+  })();
+</script>
+
+<!-- NEW: inner subtab switcher for Settings / PDF invoices / HTML invoices -->
+<script>
+  (function () {
+    const bar = document.getElementById('ii_subtabs');
+    if (!bar) return;
+
+    const secSettings = document.getElementById('ii_subtab_settings');
+    const secPdf      = document.getElementById('ii_subtab_pdf');
+    const secHtml     = document.getElementById('ii_subtab_html');
+
+    function showSubtab(name) {
+      if (!secSettings || !secPdf || !secHtml) return;
+      secSettings.style.display = (name === 'settings') ? 'block' : 'none';
+      secPdf.style.display      = (name === 'pdf')      ? 'block' : 'none';
+      secHtml.style.display     = (name === 'html')     ? 'block' : 'none';
+    }
+
+    // default matches the "Settings" button
+    showSubtab('settings');
+
+    bar.addEventListener('click', function (e) {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.subtab;
+      if (!which) return;
+
+      bar.querySelectorAll('.tab').forEach(t => t.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      showSubtab(which);
+    });
+  })();
+</script>
+
+<!-- FINAL VERSION OF sidebar wiring: template list + CREATE TEMPLATE behaviour -->
+<script>
+  (function(){
+    const listEl = document.getElementById('ii_template_list');
+    const newBtn = document.getElementById('ii_new_template');
+    if (!listEl) return;
+
+    function getSelector() {
+      return document.getElementById('bm_template_selector');
+    }
+
+    function highlight(name) {
+      const items = listEl.querySelectorAll('[data-template-name]');
+      items.forEach((item) => {
+        if (item.dataset.templateName === name) {
+          item.classList.add('is-selected');
+        } else {
+          item.classList.remove('is-selected');
+        }
+      });
+    }
+
+    function selectTemplateByName(name) {
+      const sel = getSelector();
+      if (!sel) return;
+
+      if (name && sel.value !== name) {
+        const opt = Array.from(sel.options).find(o => o.value === name);
+        if (!opt) return;
+        sel.value = name;
+        sel.dispatchEvent(new Event('change'));
+      }
+      highlight(name || '');
+    }
+
+    function rebuildList() {
+      const sel = getSelector();
+      if (!sel) return;
+
+      const options = Array.from(sel.options).filter(opt => opt.value);
+      listEl.innerHTML = '';
+
+      if (!options.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.style.padding = '8px';
+        empty.innerHTML = 'No templates yet.<br>Enter a name above and click <strong>Create template</strong>.';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      options.forEach((opt) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.templateName = opt.value;
+        btn.textContent = opt.textContent || opt.value;
+        Object.assign(btn.style, {
+          display: 'flex',
+          width: '100%',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '6px 8px',
+          border: '0',
+          borderBottom: '1px solid #e5e7eb',
+          background: '#ffffff',
+          cursor: 'pointer',
+          fontSize: '14px',
+          textAlign: 'left'
+        });
+
+        btn.addEventListener('click', () => {
+          selectTemplateByName(opt.value);
+        });
+
+        listEl.appendChild(btn);
+      });
+
+      const selValue = sel.value || '';
+      const nameInput = document.getElementById('bm_template_name');
+      const current =
+        selValue ||
+        ((nameInput && nameInput.value) ? nameInput.value.trim() : '');
+
+      if (current) {
+        highlight(current);
+      }
+    }
+
+    const sel = getSelector();
+    if (sel) {
+      const observer = new MutationObserver(rebuildList);
+      observer.observe(sel, { childList: true });
+      sel.addEventListener('change', () => {
+        highlight(sel.value || '');
+        const nameInput = document.getElementById('bm_template_name');
+        if (nameInput && sel.value) {
+          nameInput.value = sel.value;
+        }
+      });
+      rebuildList();
+    }
+
+    if (newBtn) {
+      newBtn.addEventListener('click', async () => {
+        const nameInput = document.getElementById('bm_template_name');
+        if (!nameInput || !nameInput.value.trim()) {
+          alert('Enter a template name first.');
+          if (nameInput) nameInput.focus();
+          return;
+        }
+
+        const tpl = {
+          template_id: 'user-invoice-template',
+          page: 1,
+          fields: [],
+          customer_map: {
+            by: 'name',
+            trigger_text: '',
+            direction: 'right',
+            anchor: { page: 1, x: 0, y: 0 },
+            filter: { type: 'none' },
+            blocks: []
+          }
+        };
+
+        const fd = new FormData();
+        fd.append('template_json', JSON.stringify(tpl));
+        fd.append('template_name', nameInput.value.trim());
+
+        try {
+          const r = await fetch('/api/inbound/blocks/save-template', {
+            method: 'POST',
+            body: fd
+          });
+          if (!r.ok) {
+            let detail = '';
+            try { detail = await r.text(); } catch {}
+            alert('Could not save template: ' + (detail || r.status));
+            return;
+          }
+          window.location.reload();
+        } catch (e) {
+          console.error(e);
+          alert('Could not save template.');
+        }
+      });
+    }
+  })();
+</script>
+
+<!-- FINAL VERSION OF step 2/3 help toggle script -->
+<script>
+  (function() {
+    const btn2 = document.getElementById('bm_step2_help_btn');
+    const help2 = document.getElementById('bm_step2_help');
+    const btn3 = document.getElementById('bm_step3_help_btn');
+    const help3 = document.getElementById('bm_step3_help');
+
+    function toggle(el) {
+      if (!el) return;
+      const cur = window.getComputedStyle(el).display;
+      el.style.display = (cur === 'none') ? 'block' : 'none';
+    }
+
+    if (btn2 && help2) {
+      btn2.addEventListener('click', function() { toggle(help2); });
+    }
+    if (btn3 && help3) {
+      btn3.addEventListener('click', function() { toggle(help3); });
+    }
+  })();
+</script>
+
+<!-- Help-toggle script for invoice-import settings info icons -->
+<script>
+  (function () {
+    const buttons = document.querySelectorAll('[data-help-toggle]');
+    if (!buttons.length) return;
+
+    buttons.forEach((btn) => {
+      const targetId = btn.getAttribute('data-help-toggle');
+      if (!targetId) return;
+      const el = document.getElementById(targetId);
+      if (!el) return;
+
+      btn.addEventListener('click', function () {
+        const cur = window.getComputedStyle(el).display;
+        el.style.display = (cur === 'none') ? 'block' : 'none';
+      });
+    });
+  })();
+</script>
+
+{% endblock %}
