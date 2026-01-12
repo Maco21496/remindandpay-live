@@ -64,7 +64,6 @@ def list_templates(
     return {"ok": True, "templates": templates}
 
 
-@router.get("/load-template")
 def _slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value or "").strip("-").lower()
     return cleaned or "template"
@@ -98,6 +97,7 @@ def _ensure_subject_token(
     return token
 
 
+@router.get("/load-template")
 def load_template(
     current_user: Any = Depends(require_user),
     db: Session = Depends(get_db),
