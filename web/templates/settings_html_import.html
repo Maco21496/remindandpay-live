@@ -1,3 +1,4 @@
+<!-- FINAL VERSION OF web/templates/settings_html_import.html -->
 {% extends "base.html" %}
 {% set title = "HTML invoice import — Remind & Pay" %}
 {% block content %}
@@ -36,14 +37,32 @@
           </div>
 
           <div style="flex:1; min-width:260px;">
+            <div class="field" style="margin-bottom:8px;">
+              <label for="html_template_name" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+                Template name
+              </label>
+              <input id="html_template_name" type="text" placeholder="e.g. HTML invoice template" style="height:32px; padding:0 8px; width:100%;">
+              <div class="muted" style="font-size:12px; margin-top:4px;">Save the HTML example to this template name.</div>
+            </div>
+
+            <div class="field" style="margin-bottom:8px;">
+              <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+                Saved templates
+              </label>
+              <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
+                <option value="">(choose template)</option>
+              </select>
+            </div>
+
             <textarea
               id="html_invoice_body"
               rows="10"
               placeholder="Paste HTML email body here..."
               style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
             ></textarea>
+
             <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
-              <button id="html_invoice_save" class="btn" type="button">Save HTML email</button>
+              <button id="html_invoice_save" class="btn" type="button">Save HTML template</button>
               <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
             </div>
           </div>
@@ -93,6 +112,8 @@
     });
   })();
 </script>
+
+<script src="/static/js/settings_html_import.js"></script>
 
 <script>
   (function () {
