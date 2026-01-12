@@ -186,3 +186,13 @@ def settings_invoice_import_page(request: Request, user = Depends(require_user))
     )
 
 
+@app.get("/settings/html-import")
+def settings_html_import_page(request: Request, user = Depends(require_user)):
+    return templates.TemplateResponse(
+        "settings_html_import.html",
+        {
+            "request": request,
+            "active": ""
+        },
+    )
+
