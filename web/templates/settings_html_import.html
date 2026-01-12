@@ -25,77 +25,71 @@
   </div>
 
   <div class="content" style="padding:12px;">
-    <div class="subpanel" style="padding:16px 18px;">
-      <div style="display:flex; flex-direction:column; gap:18px;">
-        <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
-          <div style="width:220px; min-width:200px;">
-            <div style="font-weight:600;">Template name</div>
-            <p class="muted" style="margin:4px 0 0; font-size:12px;">
-              Step 1: create a template name before saving the HTML sample.
-            </p>
-          </div>
+    <div style="display:grid; grid-template-columns:260px 320px 1fr; gap:16px; align-items:flex-start;">
 
-          <div style="flex:1; min-width:260px;">
-            <div class="field" style="margin-bottom:8px;">
-              <label for="html_template_name" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
-                Template name
-              </label>
-              <input id="html_template_name" type="text" placeholder="e.g. HTML invoice template" style="height:32px; padding:0 8px; width:100%;">
-            </div>
-            <div class="field-row" style="gap:8px; align-items:center; margin-bottom:8px;">
-              <button id="html_template_create" class="btn" type="button">Create template</button>
-              <span class="muted" style="font-size:12px;">Step 1</span>
-            </div>
-            <div class="field" style="margin-bottom:8px;">
-              <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
-                Saved templates
-              </label>
-              <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
-                <option value="">(choose template)</option>
-              </select>
-              <div class="muted" style="font-size:12px; margin-top:4px;">Select a template to load its saved HTML sample.</div>
-            </div>
-          </div>
+      <!-- LEFT COLUMN: template list + create -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="margin-bottom:8px;">
+          <div style="font-weight:600;">HTML templates</div>
+          <div class="muted" style="font-size:12px;">Step 1: create or select a template.</div>
         </div>
 
-        <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
-          <div style="width:220px; min-width:200px;">
-            <div style="font-weight:600;">Paste HTML email</div>
-            <p class="muted" style="margin:4px 0 0; font-size:12px;">
-              Step 2: paste the HTML email body and save it to the template.
-            </p>
-          </div>
-
-          <div style="flex:1; min-width:260px;">
-            <textarea
-              id="html_invoice_body"
-              rows="10"
-              placeholder="Paste HTML email body here..."
-              style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
-            ></textarea>
-            <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
-              <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
-              <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
-            </div>
-          </div>
+        <div class="field" style="margin-bottom:8px;">
+          <label for="html_template_name" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+            Template name
+          </label>
+          <input id="html_template_name" type="text" placeholder="e.g. HTML invoice template" style="height:32px; padding:0 8px; width:100%;">
         </div>
 
-        <div style="border-top:1px solid #e5e7eb; padding-top:16px;">
-          <h3 style="margin:0 0 8px 0; font-size:16px;">HTML mapping steps</h3>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
-            <div class="subpanel" style="padding:12px;">
-              <div style="font-weight:600;">Step 1</div>
-              <div class="muted" style="margin-top:4px; font-size:12px;">Choose the field you want to map.</div>
-            </div>
-            <div class="subpanel" style="padding:12px;">
-              <div style="font-weight:600;">Step 2</div>
-              <div class="muted" style="margin-top:4px; font-size:12px;">Choose the target value to populate.</div>
-            </div>
-            <div class="subpanel" style="padding:12px;">
-              <div style="font-weight:600;">Step 3</div>
-              <div class="muted" style="margin-top:4px; font-size:12px;">Select where the value lives in the HTML.</div>
-            </div>
-          </div>
+        <button id="html_template_create" class="btn" type="button" style="width:100%; margin-bottom:10px;">
+          Create template
+        </button>
+
+        <div class="field">
+          <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+            Saved templates
+          </label>
+          <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
+            <option value="">(choose template)</option>
+          </select>
+          <div class="muted" style="font-size:12px; margin-top:4px;">Select a template to load its saved HTML sample.</div>
+        </div>
+      </div>
+
+      <!-- MIDDLE COLUMN: mapping steps -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">HTML mapping steps</div>
+        <div class="subpanel" style="padding:12px; margin-bottom:10px;">
+          <div style="font-weight:600;">Step 1 — Choose field</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Select which invoice field you want to map.</div>
+        </div>
+        <div class="subpanel" style="padding:12px; margin-bottom:10px;">
+          <div style="font-weight:600;">Step 2 — Pick target</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Choose where that value should be stored.</div>
+        </div>
+        <div class="subpanel" style="padding:12px;">
+          <div style="font-weight:600;">Step 3 — Locate value</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Identify the value in the HTML content.</div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: HTML sample + preview -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">HTML sample</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">Step 2: paste the HTML email body and save it to the template.</div>
+        <textarea
+          id="html_invoice_body"
+          rows="12"
+          placeholder="Paste HTML email body here..."
+          style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:220px;"
+        ></textarea>
+        <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+          <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
+          <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:12px;">Preview (coming next): the HTML will render here for selection.</div>
+        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-top:6px; background:#fff; min-height:200px;">
+          <div class="muted" style="font-size:12px;">HTML preview placeholder</div>
         </div>
       </div>
     </div>
