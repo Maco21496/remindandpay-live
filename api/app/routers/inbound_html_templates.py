@@ -259,37 +259,71 @@ def load_sample(
         raise HTTPException(status_code=404, detail="template not found")
 
     subject_token = row.html_subject_token
-    sample = db.execute(
+    rows = db.execute(
         text(
             """
-            SELECT payload_json, created_at
+            SELECT payload_json, received_at
             FROM inbound_invoice_queue
             WHERE user_id = :uid
               AND source = 'email'
-              AND (
-                JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.Subject')) LIKE :subject_like
-                OR JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.OriginalSubject')) LIKE :subject_like
-              )
             ORDER BY id DESC
-            LIMIT 1
+            LIMIT 50
             """
         ),
-        {"uid": user_id, "subject_like": f"%{subject_token}%"},
-    ).fetchone()
-    if not sample:
+        {"uid": user_id},
+    ).fetchall()
+
+    def _subject_from_payload(payload: dict) -> str:
+        subj = payload.get("Subject") or payload.get("OriginalSubject") or ""
+        if subj:
+            return subj
+        headers = payload.get("Headers") or []
+        if isinstance(headers, list):
+            for header in headers:
+                if not isinstance(header, dict):
+                    continue
+                if (header.get("Name") or "").lower() == "subject":
+                    return header.get("Value") or ""
+        return ""
+
+    def _payload_contains_token(payload: dict, token: str) -> bool:
+        if not token:
+            return False
+        subject = _subject_from_payload(payload)
+        if token in (subject or ""):
+            return True
+        for key in ("HtmlBody", "TextBody", "StrippedTextReply", "StrippedHtmlReply"):
+            value = payload.get(key)
+            if isinstance(value, str) and token in value:
+                return True
+        try:
+            return token in json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            return False
+
+    matched_payload = None
+    matched_at = None
+    for row in rows:
+        payload = row.payload_json or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, dict):
+            continue
+        if _payload_contains_token(payload, subject_token):
+            matched_payload = payload
+            matched_at = row.received_at
+            break
+
+    if not matched_payload:
         raise HTTPException(status_code=404, detail="no sample email found")
 
-    payload = sample.payload_json or {}
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except Exception:
-            payload = {}
-
-    html_body = payload.get("HtmlBody") or ""
+    html_body = matched_payload.get("HtmlBody") or ""
     return {
         "ok": True,
         "subject_token": subject_token,
         "html_body": html_body,
-        "received_at": sample.created_at.isoformat() if sample.created_at else None,
+        "received_at": matched_at.isoformat() if matched_at else None,
     }
