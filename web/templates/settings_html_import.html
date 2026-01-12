@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% set title = "HTML invoice import — Remind & Pay" %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/settings.css">
+
+<h1>Settings</h1>
+
+<nav id="set_tabs" class="tabbar" style="margin:0 0 12px 0;">
+  <button class="tab" data-tab="app">App settings</button>
+  <button class="tab" data-tab="email">Email settings</button>
+  <button class="tab is-active" data-tab="import">Invoice import</button>
+  <button class="tab" data-tab="restore">Restore defaults</button>
+  <div style="flex:1"></div>
+</nav>
+
+<section class="panel panel--wide" style="margin-top:12px;">
+  <div class="panel__head">
+    <h2>Invoice import settings</h2>
+
+    <nav id="ii_subtabs" class="tabbar" style="margin-top:8px;">
+      <button class="tab" data-subtab="settings">Settings</button>
+      <button class="tab" data-subtab="pdf">PDF invoices</button>
+      <button class="tab is-active" data-subtab="html">HTML invoices</button>
+    </nav>
+  </div>
+
+  <div class="content" style="padding:12px;">
+    <div class="subpanel" style="padding:16px 18px;">
+      <div style="display:flex; flex-direction:column; gap:18px;">
+        <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
+          <div style="width:220px; min-width:200px;">
+            <div style="font-weight:600;">Paste HTML email</div>
+            <p class="muted" style="margin:4px 0 0; font-size:12px;">
+              Copy the raw HTML from the invoice email and save it to preview the mapping workflow.
+            </p>
+          </div>
+
+          <div style="flex:1; min-width:260px;">
+            <div class="field" style="margin-bottom:8px;">
+              <label for="html_template_name" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+                Template name
+              </label>
+              <input id="html_template_name" type="text" placeholder="e.g. HTML invoice template" style="height:32px; padding:0 8px; width:100%;">
+              <div class="muted" style="font-size:12px; margin-top:4px;">Save the HTML example to this template name.</div>
+            </div>
+            <div class="field" style="margin-bottom:8px;">
+              <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+                Saved templates
+              </label>
+              <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
+                <option value="">(choose template)</option>
+              </select>
+            </div>
+            <textarea
+              id="html_invoice_body"
+              rows="10"
+              placeholder="Paste HTML email body here..."
+              style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
+            ></textarea>
+            <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+              <button id="html_invoice_save" class="btn" type="button">Save HTML template</button>
+              <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
+            </div>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid #e5e7eb; padding-top:16px;">
+          <h3 style="margin:0 0 8px 0; font-size:16px;">HTML mapping steps</h3>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+            <div class="subpanel" style="padding:12px;">
+              <div style="font-weight:600;">Step 1</div>
+              <div class="muted" style="margin-top:4px; font-size:12px;">Choose the field you want to map.</div>
+            </div>
+            <div class="subpanel" style="padding:12px;">
+              <div style="font-weight:600;">Step 2</div>
+              <div class="muted" style="margin-top:4px; font-size:12px;">Choose the target value to populate.</div>
+            </div>
+            <div class="subpanel" style="padding:12px;">
+              <div style="font-weight:600;">Step 3</div>
+              <div class="muted" style="margin-top:4px; font-size:12px;">Select where the value lives in the HTML.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function(){
+    const tabs = document.getElementById('set_tabs');
+    if (!tabs) return;
+
+    tabs.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.tab;
+
+      if (which === 'import') {
+        return;
+      } else if (which === 'app') {
+        window.location.href = '/settings';
+      } else if (which === 'email') {
+        window.location.href = '/settings';
+      } else if (which === 'restore') {
+        window.location.href = '/settings';
+      }
+    });
+  })();
+</script>
+
+<script src="/static/js/settings_html_import.js"></script>
+
+<script>
+  (function () {
+    const bar = document.getElementById('ii_subtabs');
+    if (!bar) return;
+
+    bar.addEventListener('click', function (e) {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.subtab;
+      if (!which) return;
+
+      if (which === 'settings') {
+        window.location.href = '/settings/invoice-import';
+        return;
+      }
+
+      if (which === 'pdf') {
+        window.location.href = '/settings/invoice-import';
+        return;
+      }
+
+      if (which === 'html') {
+        return;
+      }
+    });
+  })();
+</script>
+
+{% endblock %}
