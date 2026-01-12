@@ -17,9 +17,10 @@
 
   function setPreview(html) {
     if (!previewEl) return;
-    previewEl.innerHTML = html && html.trim()
+    const content = html && html.trim()
       ? html
-      : '<div class="muted" style="font-size:12px;">HTML preview placeholder</div>';
+      : '<div style="font-size:12px; color:#6b7280;">HTML preview placeholder</div>';
+    previewEl.srcdoc = content;
   }
 
   function collapseEditor(collapsed) {
