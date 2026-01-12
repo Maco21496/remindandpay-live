@@ -5,12 +5,34 @@
   const bodyInput = document.getElementById('html_invoice_body');
   const createBtn = document.getElementById('html_template_create');
   const saveBtn = document.getElementById('html_invoice_save');
+  const editBtn = document.getElementById('html_invoice_edit');
   const msgEl = document.getElementById('html_invoice_msg');
+  const previewEl = document.getElementById('html_preview');
   let activeTemplateName = '';
 
   function setActiveTemplate(name) {
     activeTemplateName = (name || '').trim();
     if (saveBtn) saveBtn.disabled = !activeTemplateName;
+  }
+
+  function setPreview(html) {
+    if (!previewEl) return;
+    previewEl.innerHTML = html && html.trim()
+      ? html
+      : '<div class="muted" style="font-size:12px;">HTML preview placeholder</div>';
+  }
+
+  function collapseEditor(collapsed) {
+    if (!bodyInput || !saveBtn || !editBtn) return;
+    if (collapsed) {
+      bodyInput.style.display = 'none';
+      saveBtn.style.display = 'none';
+      editBtn.style.display = 'inline-flex';
+    } else {
+      bodyInput.style.display = '';
+      saveBtn.style.display = '';
+      editBtn.style.display = 'none';
+    }
   }
 
   async function loadTemplates(selectedName) {
@@ -42,6 +64,8 @@
       if (nameInput) nameInput.value = data.template_name || name;
       if (bodyInput) bodyInput.value = data.html_body || '';
       setActiveTemplate(data.template_name || name);
+      setPreview(data.html_body || '');
+      collapseEditor(!!(data.html_body || '').trim());
     } catch (err) {
       console.error('Failed to load HTML template', err);
     }
@@ -69,6 +93,8 @@
       msgEl.textContent = 'Saved.';
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
+      setPreview(body);
+      collapseEditor(!!body.trim());
     } catch (err) {
       msgEl.textContent = 'Save failed.';
       console.error('Failed to save HTML template', err);
@@ -96,6 +122,7 @@
       msgEl.textContent = 'Template created.';
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
+      collapseEditor(false);
     } catch (err) {
       msgEl.textContent = 'Create failed.';
       console.error('Failed to create HTML template', err);
@@ -108,6 +135,9 @@
   });
   createBtn?.addEventListener('click', createTemplate);
   saveBtn?.addEventListener('click', saveTemplate);
+  editBtn?.addEventListener('click', () => collapseEditor(false));
   setActiveTemplate('');
+  setPreview('');
+  collapseEditor(false);
   loadTemplates();
 })();

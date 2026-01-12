@@ -56,9 +56,25 @@
         </div>
       </div>
 
-      <!-- MIDDLE COLUMN: mapping steps -->
+      <!-- MIDDLE COLUMN: HTML sample + mapping steps -->
       <div class="subpanel" style="padding:12px;">
-        <div style="font-weight:600; margin-bottom:8px;">HTML mapping steps</div>
+        <div style="font-weight:600; margin-bottom:8px;">HTML sample</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">Step 2: paste the HTML email body and save it to the template.</div>
+        <div id="html_sample_editor">
+          <textarea
+            id="html_invoice_body"
+            rows="10"
+            placeholder="Paste HTML email body here..."
+            style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
+          ></textarea>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+            <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
+            <button id="html_invoice_edit" class="btn btn--subtle" type="button" style="display:none;">Edit HTML sample</button>
+            <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
+          </div>
+        </div>
+
+        <div style="font-weight:600; margin:16px 0 8px;">HTML mapping steps</div>
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
           <div style="font-weight:600;">Step 1 — Choose field</div>
           <div class="muted" style="margin-top:4px; font-size:12px;">Select which invoice field you want to map.</div>
@@ -73,22 +89,11 @@
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: HTML sample + preview -->
+      <!-- RIGHT COLUMN: HTML preview -->
       <div class="subpanel" style="padding:12px;">
-        <div style="font-weight:600; margin-bottom:8px;">HTML sample</div>
-        <div class="muted" style="font-size:12px; margin-bottom:8px;">Step 2: paste the HTML email body and save it to the template.</div>
-        <textarea
-          id="html_invoice_body"
-          rows="12"
-          placeholder="Paste HTML email body here..."
-          style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:220px;"
-        ></textarea>
-        <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
-          <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
-          <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
-        </div>
-        <div class="muted" style="font-size:12px; margin-top:12px;">Preview (coming next): the HTML will render here for selection.</div>
-        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-top:6px; background:#fff; min-height:200px;">
+        <div style="font-weight:600; margin-bottom:8px;">HTML preview</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">Step 3: select values directly in the rendered HTML.</div>
+        <div id="html_preview" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fff; min-height:420px; overflow:auto;">
           <div class="muted" style="font-size:12px;">HTML preview placeholder</div>
         </div>
       </div>
