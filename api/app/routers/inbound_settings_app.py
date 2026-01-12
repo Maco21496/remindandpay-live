@@ -96,8 +96,8 @@ class InboundSaveIn(BaseModel):
         """
         reader = values.get("inbound_reader")
         active = values.get("inbound_active")
-        if reader == "pdf" and active and not (v or "").strip():
-            raise ValueError("inbound_block_template_name is required when inbound_reader='pdf' and inbound_active is true")
+        if reader in ("pdf", "html") and active and not (v or "").strip():
+            raise ValueError("inbound_block_template_name is required when inbound_reader is pdf/html and inbound_active is true")
         return v
 
 # ---------- Helpers ----------
