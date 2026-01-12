@@ -58,7 +58,18 @@
         opt.textContent = item.template_name;
         selectEl.appendChild(opt);
       }
-      if (selectedName) selectEl.value = selectedName;
+      if (selectedName) {
+        selectEl.value = selectedName;
+      }
+      const chosen = selectEl.value || (list[0]?.template_name || '');
+      if (chosen) {
+        selectEl.value = chosen;
+        await loadTemplate(chosen);
+      } else {
+        setSubjectToken('');
+        setPreview('');
+        collapseEditor(false);
+      }
     } catch (err) {
       console.error('Failed to load HTML templates', err);
     }
