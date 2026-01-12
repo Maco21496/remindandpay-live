@@ -266,12 +266,15 @@ def load_sample(
             FROM inbound_invoice_queue
             WHERE user_id = :uid
               AND source = 'email'
-              AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.Subject')) = :subject
+              AND (
+                JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.Subject')) LIKE :subject_like
+                OR JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.OriginalSubject')) LIKE :subject_like
+              )
             ORDER BY id DESC
             LIMIT 1
             """
         ),
-        {"uid": user_id, "subject": subject_token},
+        {"uid": user_id, "subject_like": f"%{subject_token}%"},
     ).fetchone()
     if not sample:
         raise HTTPException(status_code=404, detail="no sample email found")

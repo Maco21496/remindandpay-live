@@ -598,7 +598,8 @@ async def postmark_inbound(
     )
     db.commit()
 
-    if not bool(row.inbound_active):
+    reader = (row.inbound_reader or "").lower() if row.inbound_reader else ""
+    if not bool(row.inbound_active) and reader != "html":
         return {"ok": True, "queued": False, "reason": "intake_disabled"}
 
     queue_ids: list[int] = []
@@ -733,6 +734,8 @@ async def postmark_inbound(
             db.commit()
 
     # Auto-import if enabled; apply to each queued item.
+    if not bool(row.inbound_active):
+        return {"ok": True, "queued": True, "preview_only": True, "queued_items": len(queue_ids)}
     if bool(getattr(row, "auto_invoice_import", 0)) and queue_ids:
         imported_count = 0
         first_fail_reason: Optional[str] = None
