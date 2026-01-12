@@ -8,6 +8,9 @@
   const editBtn = document.getElementById('html_invoice_edit');
   const msgEl = document.getElementById('html_invoice_msg');
   const previewEl = document.getElementById('html_preview');
+  const subjectInput = document.getElementById('html_subject_token');
+  const subjectCopyBtn = document.getElementById('html_subject_copy');
+  const subjectRefreshBtn = document.getElementById('html_subject_refresh');
   let activeTemplateName = '';
 
   function setActiveTemplate(name) {
@@ -21,6 +24,11 @@
       ? html
       : '<div style="font-size:12px; color:#6b7280;">HTML preview placeholder</div>';
     previewEl.srcdoc = content;
+  }
+
+  function setSubjectToken(token) {
+    if (!subjectInput) return;
+    subjectInput.value = token || '';
   }
 
   function collapseEditor(collapsed) {
@@ -64,6 +72,7 @@
       const data = await res.json();
       if (nameInput) nameInput.value = data.template_name || name;
       if (bodyInput) bodyInput.value = data.html_body || '';
+      setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
       setPreview(data.html_body || '');
       collapseEditor(!!(data.html_body || '').trim());
@@ -91,9 +100,11 @@
         msgEl.textContent = 'Save failed.';
         return;
       }
+      const data = await res.json();
       msgEl.textContent = 'Saved.';
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
+      setSubjectToken(data.subject_token || subjectInput?.value || '');
       setPreview(body);
       collapseEditor(!!body.trim());
     } catch (err) {
@@ -120,9 +131,11 @@
         msgEl.textContent = 'Create failed.';
         return;
       }
+      const data = await res.json();
       msgEl.textContent = 'Template created.';
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
+      setSubjectToken(data.subject_token || subjectInput?.value || '');
       collapseEditor(false);
     } catch (err) {
       msgEl.textContent = 'Create failed.';
@@ -137,8 +150,34 @@
   createBtn?.addEventListener('click', createTemplate);
   saveBtn?.addEventListener('click', saveTemplate);
   editBtn?.addEventListener('click', () => collapseEditor(false));
+  subjectCopyBtn?.addEventListener('click', () => {
+    if (!subjectInput || !subjectInput.value) return;
+    subjectInput.select();
+    document.execCommand('copy');
+  });
+  subjectRefreshBtn?.addEventListener('click', async () => {
+    if (!activeTemplateName) return;
+    if (msgEl) msgEl.textContent = 'Refreshing preview…';
+    try {
+      const res = await fetch(`/api/inbound/html/sample?template_name=${encodeURIComponent(activeTemplateName)}`, { cache: 'no-store' });
+      if (!res.ok) {
+        if (msgEl) msgEl.textContent = 'No matching email found yet.';
+        return;
+      }
+      const data = await res.json();
+      if (bodyInput) bodyInput.value = data.html_body || '';
+      setSubjectToken(data.subject_token || subjectInput?.value || '');
+      setPreview(data.html_body || '');
+      collapseEditor(!!(data.html_body || '').trim());
+      if (msgEl) msgEl.textContent = 'Preview updated.';
+    } catch (err) {
+      if (msgEl) msgEl.textContent = 'Preview refresh failed.';
+      console.error('Failed to refresh HTML preview', err);
+    }
+  });
   setActiveTemplate('');
   setPreview('');
+  setSubjectToken('');
   collapseEditor(false);
   loadTemplates();
 })();

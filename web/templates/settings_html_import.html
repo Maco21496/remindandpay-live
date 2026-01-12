@@ -54,6 +54,24 @@
           </select>
           <div class="muted" style="font-size:12px; margin-top:4px;">Select a template to load its saved HTML sample.</div>
         </div>
+
+        <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
+          <div style="font-weight:600; margin-bottom:6px;">Template subject</div>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">
+            Default option: forward an example invoice email to your import address with this subject line.
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center;">
+            <input id="html_subject_token" readonly style="height:32px; padding:0 8px; flex:1;">
+            <button id="html_subject_copy" class="btn btn--subtle" type="button">Copy</button>
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+            <button id="html_subject_refresh" class="btn btn--ghost" type="button">Refresh preview</button>
+            <span class="muted" style="font-size:12px;">Wait ~10 seconds after forwarding, then refresh.</span>
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:8px;">
+            Advanced: paste raw HTML below if you have it (Outlook desktop usually hides it).
+          </div>
+        </div>
       </div>
 
       <!-- MIDDLE COLUMN: HTML sample + mapping steps -->

@@ -1,6 +1,8 @@
 # NEW: HTML invoice templates
 from __future__ import annotations
 import json
+import re
+import secrets
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, Form, HTTPException
@@ -36,7 +38,7 @@ def list_templates(
     rows = db.execute(
         text(
             """
-            SELECT html_template_name, html_created_at, html_updated_at
+            SELECT html_template_name, html_created_at, html_updated_at, html_subject_token
             FROM ic_html_template
             WHERE html_user_id = :uid
             ORDER BY html_updated_at DESC, html_created_at DESC
@@ -47,7 +49,7 @@ def list_templates(
 
     templates = []
     for row in rows:
-        name, created_at, updated_at = row
+        name, created_at, updated_at, subject_token = row
         if not name:
             continue
         templates.append(
@@ -55,6 +57,7 @@ def list_templates(
                 "template_name": name,
                 "created_at": created_at.isoformat() if created_at else None,
                 "updated_at": updated_at.isoformat() if updated_at else None,
+                "subject_token": subject_token,
             }
         )
 
@@ -62,6 +65,39 @@ def list_templates(
 
 
 @router.get("/load-template")
+def _slugify(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", value or "").strip("-").lower()
+    return cleaned or "template"
+
+
+def _generate_subject_token(name: str) -> str:
+    return f"html-{_slugify(name)[:24]}-{secrets.token_hex(3)}"
+
+
+def _ensure_subject_token(
+    db: Session,
+    user_id: int,
+    template_name: str,
+    existing: Optional[str],
+) -> str:
+    token = (existing or "").strip()
+    if token:
+        return token
+    token = _generate_subject_token(template_name)
+    db.execute(
+        text(
+            """
+            UPDATE ic_html_template
+            SET html_subject_token = :token
+            WHERE html_user_id = :uid AND html_template_name = :name
+            """
+        ),
+        {"uid": user_id, "name": template_name, "token": token},
+    )
+    db.commit()
+    return token
+
+
 def load_template(
     current_user: Any = Depends(require_user),
     db: Session = Depends(get_db),
@@ -76,7 +112,7 @@ def load_template(
         row = db.execute(
             text(
                 """
-                SELECT html_template_name, html_template_json, html_body
+                SELECT html_template_name, html_template_json, html_body, html_subject_token
                 FROM ic_html_template
                 WHERE html_user_id = :uid AND html_template_name = :name
                 ORDER BY html_updated_at DESC, html_created_at DESC
@@ -89,7 +125,7 @@ def load_template(
         row = db.execute(
             text(
                 """
-                SELECT html_template_name, html_template_json, html_body
+                SELECT html_template_name, html_template_json, html_body, html_subject_token
                 FROM ic_html_template
                 WHERE html_user_id = :uid
                 ORDER BY html_updated_at DESC, html_created_at DESC
@@ -102,20 +138,29 @@ def load_template(
     template_name_out: Optional[str] = None
     template_json: Any = {}
     html_body: str = ""
+    subject_token: Optional[str] = None
 
     if row:
-        template_name_out, template_json, html_body = row
+        template_name_out, template_json, html_body, subject_token = row
         if isinstance(template_json, str):
             try:
                 template_json = json.loads(template_json)
             except Exception:
                 template_json = {}
+        if template_name_out:
+            subject_token = _ensure_subject_token(
+                db,
+                user_id,
+                template_name_out,
+                subject_token,
+            )
 
     return {
         "ok": True,
         "template_name": template_name_out,
         "template_json": template_json or {},
         "html_body": html_body or "",
+        "subject_token": subject_token,
     }
 
 
@@ -159,14 +204,16 @@ def save_template(
         },
     )
 
+    subject_token = None
     if result.rowcount == 0:
+        subject_token = _generate_subject_token(cleaned_name)
         db.execute(
             text(
                 """
                 INSERT INTO ic_html_template
-                    (html_user_id, html_template_name, html_template_json, html_body, html_created_at, html_updated_at)
+                    (html_user_id, html_template_name, html_template_json, html_body, html_subject_token, html_created_at, html_updated_at)
                 VALUES
-                    (:uid, :name, CAST(:tpl AS JSON), :body, NOW(), NOW())
+                    (:uid, :name, CAST(:tpl AS JSON), :body, :token, NOW(), NOW())
                 """
             ),
             {
@@ -174,8 +221,72 @@ def save_template(
                 "name": cleaned_name,
                 "tpl": json.dumps(parsed, ensure_ascii=False),
                 "body": html_body or "",
+                "token": subject_token,
             },
         )
 
+    if not subject_token:
+        subject_token = _ensure_subject_token(
+            db,
+            user_id,
+            cleaned_name,
+            None,
+        )
+
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "subject_token": subject_token}
+
+
+@router.get("/sample")
+def load_sample(
+    template_name: str,
+    current_user: Any = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    user_id = _get_user_id(current_user)
+    row = db.execute(
+        text(
+            """
+            SELECT html_subject_token
+            FROM ic_html_template
+            WHERE html_user_id = :uid AND html_template_name = :name
+            LIMIT 1
+            """
+        ),
+        {"uid": user_id, "name": template_name},
+    ).fetchone()
+    if not row or not row.html_subject_token:
+        raise HTTPException(status_code=404, detail="template not found")
+
+    subject_token = row.html_subject_token
+    sample = db.execute(
+        text(
+            """
+            SELECT payload_json, created_at
+            FROM inbound_invoice_queue
+            WHERE user_id = :uid
+              AND source = 'email'
+              AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.Subject')) = :subject
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        {"uid": user_id, "subject": subject_token},
+    ).fetchone()
+    if not sample:
+        raise HTTPException(status_code=404, detail="no sample email found")
+
+    payload = sample.payload_json or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            payload = {}
+
+    html_body = payload.get("HtmlBody") or ""
+    return {
+        "ok": True,
+        "subject_token": subject_token,
+        "html_body": html_body,
+        "received_at": sample.created_at.isoformat() if sample.created_at else None,
+    }
