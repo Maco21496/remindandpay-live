@@ -603,6 +603,7 @@ async def postmark_inbound(
         return {"ok": True, "queued": False, "reason": "intake_disabled"}
 
     queue_ids: list[int] = []
+    reader = (row.inbound_reader or "").lower() if row.inbound_reader else ""
 
     if reader == "html":
         # HTML reader: extract from email body (ignore attachments)
