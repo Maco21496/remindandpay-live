@@ -11,7 +11,12 @@
   const subjectInput = document.getElementById('html_subject_token');
   const subjectCopyBtn = document.getElementById('html_subject_copy');
   const subjectRefreshBtn = document.getElementById('html_subject_refresh');
+  const sampleModeEmail = document.getElementById('html_sample_mode_email');
+  const sampleModePaste = document.getElementById('html_sample_mode_paste');
+  const sampleEditor = document.getElementById('html_sample_editor');
   let activeTemplateName = '';
+  let sampleMode = 'email';
+  let lastEmailHtml = '';
 
   function setActiveTemplate(name) {
     activeTemplateName = (name || '').trim();
@@ -32,7 +37,7 @@
   }
 
   function collapseEditor(collapsed) {
-    if (!bodyInput || !saveBtn || !editBtn) return;
+    if (!bodyInput || !saveBtn || !editBtn || sampleMode !== 'paste') return;
     if (collapsed) {
       bodyInput.style.display = 'none';
       saveBtn.style.display = 'none';
@@ -41,6 +46,21 @@
       bodyInput.style.display = '';
       saveBtn.style.display = '';
       editBtn.style.display = 'none';
+    }
+  }
+
+  function updateSampleMode(mode) {
+    sampleMode = mode === 'paste' ? 'paste' : 'email';
+    if (sampleMode === 'paste') {
+      if (sampleEditor) sampleEditor.style.display = '';
+      if (saveBtn) saveBtn.style.display = '';
+      collapseEditor(!!(bodyInput?.value || '').trim());
+      setPreview(bodyInput?.value || '');
+    } else {
+      if (sampleEditor) sampleEditor.style.display = 'none';
+      if (saveBtn) saveBtn.style.display = 'none';
+      if (editBtn) editBtn.style.display = 'none';
+      setPreview(lastEmailHtml || '');
     }
   }
 
@@ -67,8 +87,8 @@
         await loadTemplate(chosen);
       } else {
         setSubjectToken('');
-        setPreview('');
-        collapseEditor(false);
+        lastEmailHtml = '';
+        updateSampleMode(sampleMode);
       }
     } catch (err) {
       console.error('Failed to load HTML templates', err);
@@ -85,8 +105,7 @@
       if (bodyInput) bodyInput.value = data.html_body || '';
       setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
-      setPreview(data.html_body || '');
-      collapseEditor(!!(data.html_body || '').trim());
+      updateSampleMode(sampleMode);
     } catch (err) {
       console.error('Failed to load HTML template', err);
     }
@@ -116,8 +135,7 @@
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      setPreview(body);
-      collapseEditor(!!body.trim());
+      updateSampleMode(sampleMode);
     } catch (err) {
       msgEl.textContent = 'Save failed.';
       console.error('Failed to save HTML template', err);
@@ -147,7 +165,7 @@
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      collapseEditor(false);
+      updateSampleMode(sampleMode);
     } catch (err) {
       msgEl.textContent = 'Create failed.';
       console.error('Failed to create HTML template', err);
@@ -166,6 +184,12 @@
     subjectInput.select();
     document.execCommand('copy');
   });
+  sampleModeEmail?.addEventListener('change', () => {
+    if (sampleModeEmail.checked) updateSampleMode('email');
+  });
+  sampleModePaste?.addEventListener('change', () => {
+    if (sampleModePaste.checked) updateSampleMode('paste');
+  });
   subjectRefreshBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
     if (msgEl) msgEl.textContent = 'Refreshing preview…';
@@ -178,8 +202,8 @@
       const data = await res.json();
       if (bodyInput) bodyInput.value = data.html_body || '';
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      setPreview(data.html_body || '');
-      collapseEditor(!!(data.html_body || '').trim());
+      lastEmailHtml = data.html_body || '';
+      updateSampleMode(sampleMode);
       if (msgEl) msgEl.textContent = 'Preview updated.';
     } catch (err) {
       if (msgEl) msgEl.textContent = 'Preview refresh failed.';
@@ -189,6 +213,6 @@
   setActiveTemplate('');
   setPreview('');
   setSubjectToken('');
-  collapseEditor(false);
+  updateSampleMode('email');
   loadTemplates();
 })();
