@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import base64
+from html import unescape
 from typing import Optional, List, Dict, Any
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
@@ -130,6 +131,95 @@ def _extract_pdf_attachments(data: dict) -> List[tuple[bytes, Optional[str]]]:
         out.append((pdf_bytes, name or None))
 
     return out
+
+
+def _html_to_text(html_body: str) -> str:
+    if not html_body:
+        return ""
+    cleaned = re.sub(r"(?is)<(script|style)[^>]*>.*?</\\1>", "", html_body)
+    cleaned = re.sub(r"(?i)<br\\s*/?>", "\n", cleaned)
+    cleaned = re.sub(
+        r"(?i)</(p|div|tr|li|h\\d|table|section|article|header|footer|tbody|thead|tfoot)>",
+        "\n",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)<(p|div|tr|li|h\\d|table|section|article|header|footer|tbody|thead|tfoot)[^>]*>",
+        "\n",
+        cleaned,
+    )
+    cleaned = re.sub(r"(?s)<[^>]+>", "", cleaned)
+    cleaned = unescape(cleaned)
+    cleaned = cleaned.replace("\\r", "")
+    cleaned = re.sub(r"\\n{3,}", "\\n\\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_fields_from_html(text: str, template_json: Dict[str, Any]) -> Dict[str, str]:
+    fields: Dict[str, str] = {}
+    field_map = template_json.get("fields") if isinstance(template_json, dict) else None
+    if not isinstance(field_map, dict):
+        return fields
+
+    for key, spec in field_map.items():
+        if not isinstance(spec, dict):
+            continue
+        pattern = spec.get("regex")
+        if not pattern:
+            continue
+        group = spec.get("group", 1)
+        try:
+            rx = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        except re.error:
+            continue
+        match = rx.search(text)
+        if not match:
+            fields[key] = ""
+            continue
+        try:
+            value = match.group(int(group))
+        except Exception:
+            value = match.group(1)
+        fields[key] = (value or "").strip()
+    return fields
+
+
+def _load_html_template_for_user(
+    db: Session,
+    user_id: int,
+    template_name: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if not template_name:
+        return None
+
+    row = db.execute(
+        sqltext(
+            """
+            SELECT html_template_json
+              FROM ic_html_template
+             WHERE html_user_id = :uid
+               AND html_template_name = :tname
+             LIMIT 1
+            """
+        ),
+        {"uid": user_id, "tname": template_name},
+    ).first()
+
+    if not row or row.html_template_json is None:
+        return None
+
+    tpl_val = row.html_template_json
+    tpl_str = tpl_val if isinstance(tpl_val, str) else json.dumps(
+        tpl_val, ensure_ascii=False
+    )
+
+    try:
+        parsed = json.loads(tpl_str)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
 
 
 
@@ -508,67 +598,34 @@ async def postmark_inbound(
     )
     db.commit()
 
-    if not bool(row.inbound_active):
+    reader = (row.inbound_reader or "").lower() if row.inbound_reader else ""
+    if not bool(row.inbound_active) and reader != "html":
         return {"ok": True, "queued": False, "reason": "intake_disabled"}
 
-    # --- NEW: support multiple PDF attachments ---
-    attachments = _extract_pdf_attachments(data)
     queue_ids: list[int] = []
 
-    # If there are PDFs, process each into its own queue row.
-    # If there are no PDFs, preserve the previous behaviour (single row with no extracted_text).
-    if attachments:
-        for pdf_bytes, filename in attachments:
-            extracted_text: Optional[str] = None
+    if reader == "html":
+        # HTML reader: extract from email body (ignore attachments)
+        extracted_text: Optional[str] = None
+        html_body = data.get("HtmlBody") or ""
+        text_body = data.get("TextBody") or ""
 
-            if pdf_bytes:
-                tpl_model: Optional[BlockTemplateModel] = None
-                reader = (row.inbound_reader or "").lower() if row.inbound_reader else ""
-                if reader == "pdf":
-                    active_tpl_name = (
-                        getattr(row, "inbound_block_template_name", None) or ""
-                    ).strip() or None
-                    if active_tpl_name:
-                        tpl_model = _load_block_template_for_user(
-                            db, user_id_int, active_tpl_name
-                        )
+        active_tpl_name = (
+            getattr(row, "inbound_block_template_name", None) or ""
+        ).strip() or None
+        if active_tpl_name:
+            tpl = _load_html_template_for_user(db, user_id_int, active_tpl_name)
+        else:
+            tpl = None
 
-                if tpl_model is not None:
-                    fields_map = _run_block_template(pdf_bytes, tpl_model)
-                    extracted_text = json.dumps(fields_map, ensure_ascii=False)
-                else:
-                    try:
-                        extracted_text = _extract_text(pdf_bytes)
-                    except Exception:
-                        extracted_text = None
+        if tpl:
+            if html_body:
+                text_for_extract = _html_to_text(html_body)
+            else:
+                text_for_extract = text_body or ""
+            fields_map = _extract_fields_from_html(text_for_extract, tpl)
+            extracted_text = json.dumps(fields_map, ensure_ascii=False)
 
-            ins = db.execute(
-                sqltext(
-                    """
-                    INSERT INTO inbound_invoice_queue
-                        (user_id, source, source_token, original_filename,
-                         extracted_text, payload_json, status, error_message)
-                    VALUES
-                        (:uid, 'email', :tok, :fname, :txt, CAST(:payload AS JSON), :st, :err)
-                    """
-                ),
-                {
-                    "uid": user_id_int,
-                    "tok": token,
-                    "fname": filename,
-                    "txt": extracted_text,
-                    "payload": json.dumps(data, ensure_ascii=False),
-                    "st": "pending",
-                    "err": None,
-                },
-            )
-            qid = getattr(ins, "lastrowid", None)
-            if qid:
-                queue_ids.append(int(qid))
-
-        db.commit()
-    else:
-        # No PDF attachments – keep the old behaviour of queuing a single row.
         ins = db.execute(
             sqltext(
                 """
@@ -583,7 +640,7 @@ async def postmark_inbound(
                 "uid": user_id_int,
                 "tok": token,
                 "fname": None,
-                "txt": None,
+                "txt": extracted_text,
                 "payload": json.dumps(data, ensure_ascii=False),
                 "st": "pending",
                 "err": None,
@@ -593,8 +650,91 @@ async def postmark_inbound(
         if qid:
             queue_ids.append(int(qid))
         db.commit()
+    else:
+        # --- NEW: support multiple PDF attachments ---
+        attachments = _extract_pdf_attachments(data)
+
+        # If there are PDFs, process each into its own queue row.
+        # If there are no PDFs, preserve the previous behaviour (single row with no extracted_text).
+        if attachments:
+            for pdf_bytes, filename in attachments:
+                extracted_text: Optional[str] = None
+
+                if pdf_bytes:
+                    tpl_model: Optional[BlockTemplateModel] = None
+                    if reader == "pdf":
+                        active_tpl_name = (
+                            getattr(row, "inbound_block_template_name", None) or ""
+                        ).strip() or None
+                        if active_tpl_name:
+                            tpl_model = _load_block_template_for_user(
+                                db, user_id_int, active_tpl_name
+                            )
+
+                    if tpl_model is not None:
+                        fields_map = _run_block_template(pdf_bytes, tpl_model)
+                        extracted_text = json.dumps(fields_map, ensure_ascii=False)
+                    else:
+                        try:
+                            extracted_text = _extract_text(pdf_bytes)
+                        except Exception:
+                            extracted_text = None
+
+                ins = db.execute(
+                    sqltext(
+                        """
+                        INSERT INTO inbound_invoice_queue
+                            (user_id, source, source_token, original_filename,
+                             extracted_text, payload_json, status, error_message)
+                        VALUES
+                            (:uid, 'email', :tok, :fname, :txt, CAST(:payload AS JSON), :st, :err)
+                        """
+                    ),
+                    {
+                        "uid": user_id_int,
+                        "tok": token,
+                        "fname": filename,
+                        "txt": extracted_text,
+                        "payload": json.dumps(data, ensure_ascii=False),
+                        "st": "pending",
+                        "err": None,
+                    },
+                )
+                qid = getattr(ins, "lastrowid", None)
+                if qid:
+                    queue_ids.append(int(qid))
+
+            db.commit()
+        else:
+            # No PDF attachments – queue a single row.
+            ins = db.execute(
+                sqltext(
+                    """
+                    INSERT INTO inbound_invoice_queue
+                        (user_id, source, source_token, original_filename,
+                         extracted_text, payload_json, status, error_message)
+                    VALUES
+                        (:uid, 'email', :tok, :fname, :txt, CAST(:payload AS JSON), :st, :err)
+                    """
+                ),
+                {
+                    "uid": user_id_int,
+                    "tok": token,
+                    "fname": None,
+                    "txt": None,
+                    "payload": json.dumps(data, ensure_ascii=False),
+                    "st": "pending",
+                    "err": None,
+                },
+            )
+            qid = getattr(ins, "lastrowid", None)
+            if qid:
+                queue_ids.append(int(qid))
+            db.commit()
 
     # Auto-import if enabled; apply to each queued item.
+    if not bool(row.inbound_active):
+        return {"ok": True, "queued": True, "preview_only": True, "queued_items": len(queue_ids)}
     if bool(getattr(row, "auto_invoice_import", 0)) and queue_ids:
         imported_count = 0
         first_fail_reason: Optional[str] = None
