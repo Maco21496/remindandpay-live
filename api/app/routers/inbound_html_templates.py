@@ -112,7 +112,7 @@ def load_template(
         row = db.execute(
             text(
                 """
-                SELECT html_template_name, html_template_json, html_body, html_subject_token
+                SELECT html_template_name, html_template_json, html_body, html_email_body, html_subject_token
                 FROM ic_html_template
                 WHERE html_user_id = :uid AND html_template_name = :name
                 ORDER BY html_updated_at DESC, html_created_at DESC
@@ -125,7 +125,7 @@ def load_template(
         row = db.execute(
             text(
                 """
-                SELECT html_template_name, html_template_json, html_body, html_subject_token
+                SELECT html_template_name, html_template_json, html_body, html_email_body, html_subject_token
                 FROM ic_html_template
                 WHERE html_user_id = :uid
                 ORDER BY html_updated_at DESC, html_created_at DESC
@@ -138,10 +138,11 @@ def load_template(
     template_name_out: Optional[str] = None
     template_json: Any = {}
     html_body: str = ""
+    html_email_body: str = ""
     subject_token: Optional[str] = None
 
     if row:
-        template_name_out, template_json, html_body, subject_token = row
+        template_name_out, template_json, html_body, html_email_body, subject_token = row
         if isinstance(template_json, str):
             try:
                 template_json = json.loads(template_json)
@@ -160,6 +161,7 @@ def load_template(
         "template_name": template_name_out,
         "template_json": template_json or {},
         "html_body": html_body or "",
+        "html_email_body": html_email_body or "",
         "subject_token": subject_token,
     }
 
@@ -211,9 +213,9 @@ def save_template(
             text(
                 """
                 INSERT INTO ic_html_template
-                    (html_user_id, html_template_name, html_template_json, html_body, html_subject_token, html_created_at, html_updated_at)
+                    (html_user_id, html_template_name, html_template_json, html_body, html_email_body, html_subject_token, html_created_at, html_updated_at)
                 VALUES
-                    (:uid, :name, CAST(:tpl AS JSON), :body, :token, NOW(), NOW())
+                    (:uid, :name, CAST(:tpl AS JSON), :body, :email_body, :token, NOW(), NOW())
                 """
             ),
             {
@@ -221,6 +223,7 @@ def save_template(
                 "name": cleaned_name,
                 "tpl": json.dumps(parsed, ensure_ascii=False),
                 "body": html_body or "",
+                "email_body": "",
                 "token": subject_token,
             },
         )
@@ -326,7 +329,7 @@ def load_sample(
             text(
                 """
                 UPDATE ic_html_template
-                SET html_body = :body,
+                SET html_email_body = :body,
                     html_updated_at = NOW()
                 WHERE html_user_id = :uid AND html_template_name = :name
                 """

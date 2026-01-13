@@ -105,7 +105,7 @@
       if (bodyInput) bodyInput.value = data.html_body || '';
       setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
-      lastEmailHtml = data.html_body || '';
+      lastEmailHtml = data.html_email_body || '';
       updateSampleMode(sampleMode);
     } catch (err) {
       console.error('Failed to load HTML template', err);
@@ -201,9 +201,8 @@
         return;
       }
       const data = await res.json();
-      if (bodyInput) bodyInput.value = data.html_body || '';
-      setSubjectToken(data.subject_token || subjectInput?.value || '');
       lastEmailHtml = data.html_body || '';
+      setSubjectToken(data.subject_token || subjectInput?.value || '');
       updateSampleMode(sampleMode);
       if (msgEl) msgEl.textContent = 'Preview updated.';
     } catch (err) {
