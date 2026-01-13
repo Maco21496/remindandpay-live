@@ -105,6 +105,7 @@
       if (bodyInput) bodyInput.value = data.html_body || '';
       setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
+      lastEmailHtml = data.html_body || '';
       updateSampleMode(sampleMode);
     } catch (err) {
       console.error('Failed to load HTML template', err);

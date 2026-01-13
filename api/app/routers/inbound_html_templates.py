@@ -321,6 +321,19 @@ def load_sample(
         raise HTTPException(status_code=404, detail="no sample email found")
 
     html_body = matched_payload.get("HtmlBody") or ""
+    if html_body:
+        db.execute(
+            text(
+                """
+                UPDATE ic_html_template
+                SET html_body = :body,
+                    html_updated_at = NOW()
+                WHERE html_user_id = :uid AND html_template_name = :name
+                """
+            ),
+            {"uid": user_id, "name": template_name, "body": html_body},
+        )
+        db.commit()
     return {
         "ok": True,
         "subject_token": subject_token,
