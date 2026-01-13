@@ -105,18 +105,53 @@
       <!-- MIDDLE COLUMN: mapping steps -->
       <div class="subpanel" style="padding:12px;">
         <div style="font-weight:600; margin-bottom:8px;">HTML mapping steps</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">
+          Step 1: pick the field you want to map, then click the matching value in the HTML preview.
+        </div>
+        <div id="html_mapper_fields" class="subpanel" style="padding:12px; margin-bottom:12px;">
+          <div style="font-weight:600; margin-bottom:8px;">Step 1 — Choose field</div>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="invoice_number">
+            <span>Invoice number</span>
+            <span id="html_field_value_invoice_number" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="issue_date">
+            <span>Invoice date</span>
+            <span id="html_field_value_issue_date" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="due_date">
+            <span>Due date</span>
+            <span id="html_field_value_due_date" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="amount_due">
+            <span>Amount due</span>
+            <span id="html_field_value_amount_due" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center;">
+            <input type="radio" name="html_mapper_field" value="customer_name">
+            <span>Customer name</span>
+            <span id="html_field_value_customer_name" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+        </div>
+
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
-          <div style="font-weight:600;">Step 1 — Choose field</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">Select which invoice field you want to map.</div>
+          <div style="font-weight:600;">Step 2 — Click value</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Click the value in the HTML preview to capture its selector.</div>
         </div>
+
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
-          <div style="font-weight:600;">Step 2 — Pick target</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">Choose where that value should be stored.</div>
+          <div style="font-weight:600;">Step 3 — Save mapping</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Save the field mappings once you have captured the values.</div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+            <button id="html_mapper_save" class="btn btn--subtle" type="button">Save mapping</button>
+            <span id="html_mapper_msg" class="muted" style="font-size:12px;"></span>
+          </div>
         </div>
-        <div class="subpanel" style="padding:12px;">
-          <div style="font-weight:600;">Step 3 — Locate value</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">Identify the value in the HTML content.</div>
-        </div>
+
+        
       </div>
 
       <!-- RIGHT COLUMN: HTML preview -->

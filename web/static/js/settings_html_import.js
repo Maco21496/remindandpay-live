@@ -14,9 +14,14 @@
   const sampleModeEmail = document.getElementById('html_sample_mode_email');
   const sampleModePaste = document.getElementById('html_sample_mode_paste');
   const sampleEditor = document.getElementById('html_sample_editor');
+  const mapperSaveBtn = document.getElementById('html_mapper_save');
+  const mapperMsg = document.getElementById('html_mapper_msg');
   let activeTemplateName = '';
   let sampleMode = 'email';
   let lastEmailHtml = '';
+  let templateJson = { fields: {} };
+  let activeFieldKey = '';
+  let lastSelectedEl = null;
 
   function setActiveTemplate(name) {
     activeTemplateName = (name || '').trim();
@@ -62,6 +67,80 @@
       if (editBtn) editBtn.style.display = 'none';
       setPreview(lastEmailHtml || '');
     }
+    attachPreviewClickHandler();
+  }
+
+  function setTemplateJson(data) {
+    if (data && typeof data === 'object') {
+      templateJson = data;
+    } else {
+      templateJson = { fields: {} };
+    }
+    if (!templateJson.fields || typeof templateJson.fields !== 'object') {
+      templateJson.fields = {};
+    }
+  }
+
+  function updateFieldBadge(fieldKey, value) {
+    const el = document.getElementById(`html_field_value_${fieldKey}`);
+    if (!el) return;
+    el.textContent = value ? `→ ${value}` : '';
+  }
+
+  function clearSelectedElementHighlight() {
+    if (lastSelectedEl) {
+      lastSelectedEl.style.outline = '';
+      lastSelectedEl = null;
+    }
+  }
+
+  function buildElementPath(element) {
+    if (!element) return [];
+    const path = [];
+    let node = element;
+    while (node && node.tagName && node.tagName.toLowerCase() !== 'body') {
+      const parent = node.parentElement;
+      if (!parent) break;
+      const children = Array.from(parent.children || []);
+      const index = children.indexOf(node);
+      path.unshift({
+        tag: node.tagName.toLowerCase(),
+        index
+      });
+      node = parent;
+    }
+    return path;
+  }
+
+  function attachPreviewClickHandler() {
+    if (!previewEl) return;
+    const doc = previewEl.contentDocument;
+    if (!doc) return;
+    doc.removeEventListener('click', handlePreviewClick, true);
+    doc.addEventListener('click', handlePreviewClick, true);
+  }
+
+  function handlePreviewClick(event) {
+    const target = event.target;
+    if (!target || !target.tagName) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!activeFieldKey) {
+      if (mapperMsg) mapperMsg.textContent = 'Select a field first.';
+      return;
+    }
+    clearSelectedElementHighlight();
+    target.style.outline = '2px solid #6366f1';
+    lastSelectedEl = target;
+    const textValue = (target.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    const path = buildElementPath(target);
+    templateJson.fields[activeFieldKey] = {
+      type: 'dom',
+      path,
+      attr: 'text'
+    };
+    updateFieldBadge(activeFieldKey, textValue || '(selected)');
+    if (mapperMsg) mapperMsg.textContent = `Captured ${activeFieldKey.replace('_', ' ')}.`;
   }
 
   async function loadTemplates(selectedName) {
@@ -88,6 +167,7 @@
       } else {
         setSubjectToken('');
         lastEmailHtml = '';
+        setTemplateJson({ fields: {} });
         updateSampleMode(sampleMode);
       }
     } catch (err) {
@@ -106,6 +186,10 @@
       setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
       lastEmailHtml = data.html_email_body || '';
+      setTemplateJson(data.template_json || {});
+      Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
+        updateFieldBadge(fieldKey, 'mapped');
+      });
       updateSampleMode(sampleMode);
     } catch (err) {
       console.error('Failed to load HTML template', err);
@@ -124,7 +208,7 @@
     const payload = new FormData();
     payload.append('template_name', templateName);
     payload.append('html_body', body);
-    payload.append('template_json', JSON.stringify({ fields: {} }));
+    payload.append('template_json', JSON.stringify(templateJson || { fields: {} }));
     try {
       const res = await fetch('/api/inbound/html/save-template', { method: 'POST', body: payload });
       if (!res.ok) {
@@ -154,7 +238,7 @@
     const payload = new FormData();
     payload.append('template_name', templateName);
     payload.append('html_body', bodyInput?.value || '');
-    payload.append('template_json', JSON.stringify({ fields: {} }));
+    payload.append('template_json', JSON.stringify(templateJson || { fields: {} }));
     try {
       const res = await fetch('/api/inbound/html/save-template', { method: 'POST', body: payload });
       if (!res.ok) {
@@ -184,6 +268,26 @@
     if (!subjectInput || !subjectInput.value) return;
     subjectInput.select();
     document.execCommand('copy');
+  });
+  previewEl?.addEventListener('load', () => {
+    attachPreviewClickHandler();
+  });
+  document.querySelectorAll('input[name="html_mapper_field"]').forEach((radio) => {
+    radio.addEventListener('change', (event) => {
+      activeFieldKey = event.target.value;
+      if (mapperMsg) mapperMsg.textContent = 'Click a value in the HTML preview.';
+    });
+  });
+  mapperSaveBtn?.addEventListener('click', async () => {
+    if (!activeTemplateName) return;
+    if (mapperMsg) mapperMsg.textContent = 'Saving mapping…';
+    try {
+      await saveTemplate();
+      if (mapperMsg) mapperMsg.textContent = 'Mapping saved.';
+    } catch (err) {
+      if (mapperMsg) mapperMsg.textContent = 'Mapping save failed.';
+      console.error('Failed to save mapping', err);
+    }
   });
   sampleModeEmail?.addEventListener('change', () => {
     if (sampleModeEmail.checked) updateSampleMode('email');

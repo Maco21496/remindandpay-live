@@ -5,6 +5,7 @@ import json
 import re
 import base64
 from html import unescape
+from html.parser import HTMLParser
 from typing import Optional, List, Dict, Any
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
@@ -155,7 +156,91 @@ def _html_to_text(html_body: str) -> str:
     return cleaned.strip()
 
 
-def _extract_fields_from_html(text: str, template_json: Dict[str, Any]) -> Dict[str, str]:
+class _HtmlNode:
+    def __init__(self, tag: str, attrs: Dict[str, str]) -> None:
+        self.tag = tag
+        self.attrs = attrs
+        self.children: list["_HtmlNode"] = []
+        self.text_parts: list[str] = []
+
+    def text_content(self) -> str:
+        parts = list(self.text_parts)
+        for child in self.children:
+            parts.append(child.text_content())
+        return " ".join(p.strip() for p in parts if p.strip())
+
+
+class _HtmlTreeBuilder(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.root = _HtmlNode("document", {})
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str]]) -> None:
+        attrs_dict = {key: value for key, value in attrs if key}
+        node = _HtmlNode(tag.lower(), attrs_dict)
+        self.stack[-1].children.append(node)
+        self.stack.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        if len(self.stack) > 1:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if not data:
+            return
+        self.stack[-1].text_parts.append(data)
+
+
+def _find_body_node(node: _HtmlNode) -> _HtmlNode:
+    if node.tag == "body":
+        return node
+    for child in node.children:
+        found = _find_body_node(child)
+        if found.tag == "body":
+            return found
+    return node
+
+
+def _extract_value_from_dom(html_body: str, spec: Dict[str, Any]) -> str:
+    if not html_body:
+        return ""
+    try:
+        parser = _HtmlTreeBuilder()
+        parser.feed(html_body)
+        parser.close()
+    except Exception:
+        return ""
+
+    path = spec.get("path")
+    if not isinstance(path, list):
+        return ""
+
+    node = _find_body_node(parser.root)
+    for step in path:
+        if not isinstance(step, dict):
+            return ""
+        index = step.get("index")
+        tag = step.get("tag")
+        if not isinstance(index, int):
+            return ""
+        if index < 0 or index >= len(node.children):
+            return ""
+        node = node.children[index]
+        if tag and node.tag != tag:
+            return ""
+
+    attr = spec.get("attr") or "text"
+    if attr == "text":
+        return (node.text_content() or "").strip()
+    return (node.attrs.get(attr) or "").strip()
+
+
+def _extract_fields_from_html(
+    text: str,
+    html_body: str,
+    template_json: Dict[str, Any],
+) -> Dict[str, str]:
     fields: Dict[str, str] = {}
     field_map = template_json.get("fields") if isinstance(template_json, dict) else None
     if not isinstance(field_map, dict):
@@ -164,6 +249,12 @@ def _extract_fields_from_html(text: str, template_json: Dict[str, Any]) -> Dict[
     for key, spec in field_map.items():
         if not isinstance(spec, dict):
             continue
+        if spec.get("type") == "dom" and isinstance(spec.get("path"), list):
+            value = _extract_value_from_dom(html_body or "", spec)
+            if value:
+                fields[key] = value
+                continue
+
         pattern = spec.get("regex")
         if not pattern:
             continue
@@ -619,12 +710,26 @@ async def postmark_inbound(
         else:
             tpl = None
 
+    if reader == "html":
+        # HTML reader: extract from email body (ignore attachments)
+        extracted_text: Optional[str] = None
+        html_body = data.get("HtmlBody") or ""
+        text_body = data.get("TextBody") or ""
+
+        active_tpl_name = (
+            getattr(row, "inbound_block_template_name", None) or ""
+        ).strip() or None
+        if active_tpl_name:
+            tpl = _load_html_template_for_user(db, user_id_int, active_tpl_name)
+        else:
+            tpl = None
+
         if tpl:
             if html_body:
                 text_for_extract = _html_to_text(html_body)
             else:
                 text_for_extract = text_body or ""
-            fields_map = _extract_fields_from_html(text_for_extract, tpl)
+            fields_map = _extract_fields_from_html(text_for_extract, html_body, tpl)
             extracted_text = json.dumps(fields_map, ensure_ascii=False)
 
         ins = db.execute(
