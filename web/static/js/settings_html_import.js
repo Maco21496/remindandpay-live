@@ -422,6 +422,11 @@
           handleHighlightFilter();
         }
       });
+      doc.addEventListener('click', () => {
+        if (filterSelect?.value === 'highlight_text') {
+          handleHighlightFilter();
+        }
+      });
     }
   });
   document.querySelectorAll('input[name="html_mapper_field"]').forEach((radio) => {
@@ -477,10 +482,10 @@
   filterParamB?.addEventListener('input', paramHandler);
 
   function deriveTokenFilter(raw, selection) {
-    const value = (raw || '').trim();
-    const selected = (selection || '').trim();
+    const value = (raw || '').trim().replace(/\s+/g, ' ');
+    const selected = (selection || '').trim().replace(/\s+/g, ' ');
     if (!value || !selected) return null;
-    const idx = value.indexOf(selected);
+    const idx = value.toLowerCase().indexOf(selected.toLowerCase());
     if (idx === -1) return null;
     const leftContext = value.slice(0, idx).trim();
     const rightContext = value.slice(idx + selected.length).trim();
@@ -499,7 +504,10 @@
     if (!selectedText) return;
     const sample = fieldSamples[activeFieldKey] || '';
     const derived = deriveTokenFilter(sample, selectedText);
-    if (!derived) return;
+    if (!derived) {
+      if (mapperMsg) mapperMsg.textContent = 'Could not build a filter from the highlight.';
+      return;
+    }
     templateJson.fields[activeFieldKey] = {
       ...(templateJson.fields[activeFieldKey] || {}),
       filter: derived
