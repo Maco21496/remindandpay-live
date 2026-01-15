@@ -20,6 +20,7 @@
   const filterParamWrap = document.getElementById('html_filter_params');
   const filterParamA = document.getElementById('html_filter_param_a');
   const filterParamB = document.getElementById('html_filter_param_b');
+  const filterApplyBtn = document.getElementById('html_filter_apply');
   const filterHint = document.getElementById('html_filter_hint');
   const mapperFiltered = document.getElementById('html_mapper_filtered');
   let activeTemplateName = '';
@@ -501,7 +502,10 @@
     if (!doc) return;
     const selection = doc.getSelection ? doc.getSelection() : null;
     const selectedText = (selection?.toString() || '').trim();
-    if (!selectedText) return;
+    if (!selectedText) {
+      if (mapperMsg) mapperMsg.textContent = 'Highlight text in the preview first.';
+      return;
+    }
     const sample = fieldSamples[activeFieldKey] || '';
     const derived = deriveTokenFilter(sample, selectedText);
     if (!derived) {
@@ -518,6 +522,11 @@
     updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
     if (mapperMsg) mapperMsg.textContent = 'Filter created from highlight.';
   }
+  filterApplyBtn?.addEventListener('click', () => {
+    if (filterSelect?.value === 'highlight_text') {
+      handleHighlightFilter();
+    }
+  });
   mapperSaveBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
     if (mapperMsg) mapperMsg.textContent = 'Saving mapping…';
