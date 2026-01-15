@@ -160,6 +160,31 @@
     return path;
   }
 
+  function getNodeByPath(path) {
+    if (!previewEl || !path || !Array.isArray(path)) return null;
+    const doc = previewEl.contentDocument;
+    if (!doc) return null;
+    let node = doc.body;
+    for (const step of path) {
+      if (!node || !step || typeof step.index !== 'number') return null;
+      const children = Array.from(node.children || []);
+      if (step.index < 0 || step.index >= children.length) return null;
+      node = children[step.index];
+      if (step.tag && node.tagName && node.tagName.toLowerCase() !== step.tag) return null;
+    }
+    return node;
+  }
+
+  function getValueFromSpec(spec) {
+    if (!spec || !spec.path) return '';
+    const node = getNodeByPath(spec.path);
+    if (!node) return '';
+    if (spec.attr && spec.attr !== 'text') {
+      return (node.getAttribute(spec.attr) || '').trim();
+    }
+    return (node.textContent || '').trim().replace(/\s+/g, ' ');
+  }
+
   function attachPreviewClickHandler() {
     if (!previewEl) return;
     const doc = previewEl.contentDocument;
@@ -177,11 +202,25 @@
       if (mapperMsg) mapperMsg.textContent = 'Select a field first.';
       return;
     }
+    const doc = previewEl?.contentDocument;
+    let selectionText = '';
+    let selectionElement = null;
+    if (doc) {
+      const selection = doc.getSelection ? doc.getSelection() : null;
+      selectionText = (selection?.toString() || '').trim();
+      if (selectionText && selection?.rangeCount) {
+        const range = selection.getRangeAt(0);
+        const ancestor = range.commonAncestorContainer;
+        selectionElement = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
+      }
+    }
     clearSelectedElementHighlight();
-    target.style.outline = '2px solid #6366f1';
-    lastSelectedEl = target;
-    const textValue = (target.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120);
-    const path = buildElementPath(target);
+    const chosenElement = selectionElement || target;
+    chosenElement.style.outline = '2px solid #6366f1';
+    lastSelectedEl = chosenElement;
+    const rawText = selectionText || (chosenElement.textContent || '');
+    const textValue = rawText.trim().replace(/\s+/g, ' ').slice(0, 120);
+    const path = buildElementPath(chosenElement);
     const defaultFilter = filterForField(activeFieldKey);
     templateJson.fields[activeFieldKey] = {
       type: 'dom',
@@ -242,7 +281,11 @@
       lastEmailHtml = data.html_email_body || '';
       setTemplateJson(data.template_json || {});
       Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
-        updateFieldBadge(fieldKey, 'mapped');
+        const spec = templateJson.fields[fieldKey];
+        const rawValue = getValueFromSpec(spec);
+        fieldSamples[fieldKey] = rawValue;
+        const filteredValue = applyFilter(rawValue, spec?.filter);
+        updateFieldBadge(fieldKey, filteredValue || rawValue || 'mapped');
       });
       updateFilterPreview(activeFieldKey);
       updateSampleMode(sampleMode);
