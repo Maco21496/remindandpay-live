@@ -23,6 +23,7 @@ from ..calculate_due_date import compute_due_date
 from .inbound_pdf import _extract_text
 from .inbound_pdf_blocks import (
     TemplateModel as BlockTemplateModel,
+    FilterSpec,
     _extract_text_for_blocks,
     _apply_filter,
     _pyd_validate_json,
@@ -249,10 +250,19 @@ def _extract_fields_from_html(
     for key, spec in field_map.items():
         if not isinstance(spec, dict):
             continue
+        filter_spec = None
+        raw_filter = spec.get("filter")
+        if isinstance(raw_filter, dict):
+            try:
+                filter_spec = FilterSpec(**raw_filter)
+            except Exception:
+                filter_spec = None
+        elif raw_filter is not None:
+            filter_spec = raw_filter
         if spec.get("type") == "dom" and isinstance(spec.get("path"), list):
             value = _extract_value_from_dom(html_body or "", spec)
             if value:
-                fields[key] = value
+                fields[key] = _apply_filter(value, filter_spec) if filter_spec else value
                 continue
 
         pattern = spec.get("regex")
@@ -271,7 +281,8 @@ def _extract_fields_from_html(
             value = match.group(int(group))
         except Exception:
             value = match.group(1)
-        fields[key] = (value or "").strip()
+        raw_value = (value or "").strip()
+        fields[key] = _apply_filter(raw_value, filter_spec) if filter_spec else raw_value
     return fields
 
 
@@ -695,6 +706,20 @@ async def postmark_inbound(
 
     queue_ids: list[int] = []
     reader = (row.inbound_reader or "").lower() if row.inbound_reader else ""
+
+    if reader == "html":
+        # HTML reader: extract from email body (ignore attachments)
+        extracted_text: Optional[str] = None
+        html_body = data.get("HtmlBody") or ""
+        text_body = data.get("TextBody") or ""
+
+        active_tpl_name = (
+            getattr(row, "inbound_block_template_name", None) or ""
+        ).strip() or None
+        if active_tpl_name:
+            tpl = _load_html_template_for_user(db, user_id_int, active_tpl_name)
+        else:
+            tpl = None
 
     if reader == "html":
         # HTML reader: extract from email body (ignore attachments)

@@ -87,6 +87,14 @@
     el.textContent = value ? `→ ${value}` : '';
   }
 
+  function filterForField(fieldKey) {
+    if (fieldKey === 'invoice_number') return { type: 'digits_only' };
+    if (fieldKey === 'issue_date') return { type: 'date' };
+    if (fieldKey === 'due_date') return { type: 'date' };
+    if (fieldKey === 'amount_due') return { type: 'amount' };
+    return null;
+  }
+
   function clearSelectedElementHighlight() {
     if (lastSelectedEl) {
       lastSelectedEl.style.outline = '';
@@ -137,7 +145,8 @@
     templateJson.fields[activeFieldKey] = {
       type: 'dom',
       path,
-      attr: 'text'
+      attr: 'text',
+      filter: filterForField(activeFieldKey)
     };
     updateFieldBadge(activeFieldKey, textValue || '(selected)');
     if (mapperMsg) mapperMsg.textContent = `Captured ${activeFieldKey.replace('_', ' ')}.`;
