@@ -139,9 +139,7 @@
 
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
           <div style="font-weight:600;">Step 2 — Click value</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">
-            Click the value in the HTML preview to capture its selector. You can also highlight just the text you want.
-          </div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Click the value in the HTML preview to capture its selector.</div>
         </div>
 
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
@@ -159,7 +157,15 @@
               <option value="amount">Amount</option>
               <option value="date">Date</option>
               <option value="strip_parentheses">Strip parentheses</option>
+              <option value="after_token">After token</option>
+              <option value="before_token">Before token</option>
+              <option value="between_tokens">Between tokens</option>
+              <option value="regex">Regex</option>
             </select>
+          </div>
+          <div id="html_filter_params" style="margin-top:8px;">
+            <input id="html_filter_param_a" type="text" placeholder="Token / regex" style="height:32px; padding:0 8px; width:100%; margin-bottom:6px;">
+            <input id="html_filter_param_b" type="text" placeholder="Second token / regex group" style="height:32px; padding:0 8px; width:100%; display:none;">
           </div>
           <div class="muted" style="font-size:12px; margin-top:8px;">
             Raw: <span id="html_mapper_raw">—</span>

@@ -17,6 +17,9 @@
   const mapperSaveBtn = document.getElementById('html_mapper_save');
   const mapperMsg = document.getElementById('html_mapper_msg');
   const filterSelect = document.getElementById('html_filter_select');
+  const filterParamWrap = document.getElementById('html_filter_params');
+  const filterParamA = document.getElementById('html_filter_param_a');
+  const filterParamB = document.getElementById('html_filter_param_b');
   const mapperRaw = document.getElementById('html_mapper_raw');
   const mapperFiltered = document.getElementById('html_mapper_filtered');
   let activeTemplateName = '';
@@ -117,6 +120,32 @@
     if (filterSpec.type === 'strip_parentheses') {
       return value.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
     }
+    if (filterSpec.type === 'after_token' && filterSpec.token) {
+      const parts = value.split(filterSpec.token);
+      return parts.length > 1 ? parts.slice(1).join(filterSpec.token).trim() : value;
+    }
+    if (filterSpec.type === 'before_token' && filterSpec.token) {
+      const idx = value.indexOf(filterSpec.token);
+      return idx !== -1 ? value.slice(0, idx).trim() : value;
+    }
+    if (filterSpec.type === 'between_tokens' && filterSpec.left && filterSpec.right) {
+      const leftIdx = value.indexOf(filterSpec.left);
+      if (leftIdx === -1) return value;
+      const rightIdx = value.indexOf(filterSpec.right, leftIdx + filterSpec.left.length);
+      if (rightIdx === -1) return value;
+      return value.slice(leftIdx + filterSpec.left.length, rightIdx).trim();
+    }
+    if (filterSpec.type === 'regex' && filterSpec.pattern) {
+      try {
+        const rx = new RegExp(filterSpec.pattern, 'i');
+        const match = rx.exec(value);
+        if (!match) return value;
+        const group = Number.isFinite(filterSpec.group) ? filterSpec.group : 1;
+        return (match[group] || '').trim();
+      } catch (err) {
+        return value;
+      }
+    }
     return value;
   }
 
@@ -124,6 +153,34 @@
     if (!filterSelect) return;
     const value = filterSpec?.type || 'none';
     filterSelect.value = value;
+    syncFilterParams(filterSpec);
+  }
+
+  function syncFilterParams(filterSpec) {
+    if (!filterParamWrap || !filterParamA || !filterParamB) return;
+    const type = filterSpec?.type || 'none';
+    filterParamA.style.display = (type === 'after_token' || type === 'before_token' || type === 'between_tokens' || type === 'regex')
+      ? 'block'
+      : 'none';
+    filterParamB.style.display = (type === 'between_tokens' || type === 'regex') ? 'block' : 'none';
+    if (type === 'after_token' || type === 'before_token') {
+      filterParamA.placeholder = 'Token';
+      filterParamA.value = filterSpec?.token || '';
+      filterParamB.value = '';
+    } else if (type === 'between_tokens') {
+      filterParamA.placeholder = 'Left token';
+      filterParamB.placeholder = 'Right token';
+      filterParamA.value = filterSpec?.left || '';
+      filterParamB.value = filterSpec?.right || '';
+    } else if (type === 'regex') {
+      filterParamA.placeholder = 'Regex pattern';
+      filterParamB.placeholder = 'Capture group (default 1)';
+      filterParamA.value = filterSpec?.pattern || '';
+      filterParamB.value = filterSpec?.group != null ? String(filterSpec.group) : '';
+    } else {
+      filterParamA.value = '';
+      filterParamB.value = '';
+    }
   }
 
   function updateFilterPreview(fieldKey) {
@@ -185,26 +242,6 @@
     return (node.textContent || '').trim().replace(/\s+/g, ' ');
   }
 
-  function findBestElementForSelection(doc, root, selectionText) {
-    if (!doc || !root) return null;
-    const normalized = (selectionText || '').trim().replace(/\s+/g, ' ');
-    if (!normalized) return null;
-    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-    let best = null;
-    let bestLen = Infinity;
-    while (walker.nextNode()) {
-      const el = walker.currentNode;
-      const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
-      if (!text || !text.includes(normalized)) continue;
-      if (text.length < bestLen) {
-        best = el;
-        bestLen = text.length;
-        if (bestLen === normalized.length) break;
-      }
-    }
-    return best;
-  }
-
   function attachPreviewClickHandler() {
     if (!previewEl) return;
     const doc = previewEl.contentDocument;
@@ -222,28 +259,11 @@
       if (mapperMsg) mapperMsg.textContent = 'Select a field first.';
       return;
     }
-    const doc = previewEl?.contentDocument;
-    let selectionText = '';
-    let selectionElement = null;
-    if (doc) {
-      const selection = doc.getSelection ? doc.getSelection() : null;
-      selectionText = (selection?.toString() || '').trim();
-      if (selectionText && selection?.rangeCount) {
-        const range = selection.getRangeAt(0);
-        const ancestor = range.commonAncestorContainer;
-        selectionElement = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
-      }
-    }
     clearSelectedElementHighlight();
-    let chosenElement = selectionElement || target;
-    if (selectionText && doc) {
-      const refined = findBestElementForSelection(doc, chosenElement, selectionText);
-      if (refined) chosenElement = refined;
-    }
+    const chosenElement = target;
     chosenElement.style.outline = '2px solid #6366f1';
     lastSelectedEl = chosenElement;
-    const rawText = selectionText || (chosenElement.textContent || '');
-    const textValue = rawText.trim().replace(/\s+/g, ' ').slice(0, 120);
+    const textValue = (chosenElement.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120);
     const path = buildElementPath(chosenElement);
     const defaultFilter = filterForField(activeFieldKey);
     templateJson.fields[activeFieldKey] = {
@@ -415,11 +435,33 @@
       ...(templateJson.fields[activeFieldKey] || {}),
       filter: { type: selected }
     };
+    syncFilterParams(templateJson.fields[activeFieldKey].filter);
     updateFilterPreview(activeFieldKey);
     const sample = fieldSamples[activeFieldKey] || '';
     const filtered = applyFilter(sample, templateJson.fields[activeFieldKey].filter);
     updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
   });
+  const paramHandler = () => {
+    if (!activeFieldKey || !templateJson.fields?.[activeFieldKey]) return;
+    const filterSpec = templateJson.fields[activeFieldKey].filter || { type: 'none' };
+    if (filterSpec.type === 'after_token' || filterSpec.type === 'before_token') {
+      filterSpec.token = filterParamA?.value || '';
+    } else if (filterSpec.type === 'between_tokens') {
+      filterSpec.left = filterParamA?.value || '';
+      filterSpec.right = filterParamB?.value || '';
+    } else if (filterSpec.type === 'regex') {
+      filterSpec.pattern = filterParamA?.value || '';
+      const group = parseInt(filterParamB?.value || '1', 10);
+      filterSpec.group = Number.isFinite(group) ? group : 1;
+    }
+    templateJson.fields[activeFieldKey].filter = filterSpec;
+    updateFilterPreview(activeFieldKey);
+    const sample = fieldSamples[activeFieldKey] || '';
+    const filtered = applyFilter(sample, filterSpec);
+    updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
+  };
+  filterParamA?.addEventListener('input', paramHandler);
+  filterParamB?.addEventListener('input', paramHandler);
   mapperSaveBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
     if (mapperMsg) mapperMsg.textContent = 'Saving mapping…';
