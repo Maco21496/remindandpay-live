@@ -492,8 +492,16 @@
     const rightContext = value.slice(idx + selected.length).trim();
     const leftToken = leftContext.slice(-20).trim();
     const rightToken = rightContext.slice(0, 20).trim();
-    if (!leftToken || !rightToken) return null;
-    return { type: 'between_tokens', left: leftToken, right: rightToken };
+    if (leftToken && rightToken) {
+      return { type: 'between_tokens', left: leftToken, right: rightToken };
+    }
+    if (leftToken) {
+      return { type: 'after_token', token: leftToken };
+    }
+    if (rightToken) {
+      return { type: 'before_token', token: rightToken };
+    }
+    return { type: 'regex', pattern: selected };
   }
 
   function handleHighlightFilter() {
@@ -506,7 +514,15 @@
       if (mapperMsg) mapperMsg.textContent = 'Highlight text in the preview first.';
       return;
     }
-    const sample = fieldSamples[activeFieldKey] || '';
+    let sample = fieldSamples[activeFieldKey] || '';
+    if (selection?.rangeCount) {
+      const range = selection.getRangeAt(0);
+      const ancestor = range.commonAncestorContainer;
+      const container = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
+      if (container && container.textContent) {
+        sample = container.textContent.trim().replace(/\s+/g, ' ');
+      }
+    }
     const derived = deriveTokenFilter(sample, selectedText);
     if (!derived) {
       if (mapperMsg) mapperMsg.textContent = 'Could not build a filter from the highlight.';
