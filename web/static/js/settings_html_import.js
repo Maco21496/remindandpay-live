@@ -20,7 +20,7 @@
   const filterParamWrap = document.getElementById('html_filter_params');
   const filterParamA = document.getElementById('html_filter_param_a');
   const filterParamB = document.getElementById('html_filter_param_b');
-  const mapperRaw = document.getElementById('html_mapper_raw');
+  const filterHint = document.getElementById('html_filter_hint');
   const mapperFiltered = document.getElementById('html_mapper_filtered');
   let activeTemplateName = '';
   let sampleMode = 'email';
@@ -159,6 +159,9 @@
   function syncFilterParams(filterSpec) {
     if (!filterParamWrap || !filterParamA || !filterParamB) return;
     const type = filterSpec?.type || 'none';
+    if (filterHint) {
+      filterHint.style.display = type === 'highlight_text' ? 'block' : 'none';
+    }
     filterParamA.style.display = (type === 'after_token' || type === 'before_token' || type === 'between_tokens' || type === 'regex')
       ? 'block'
       : 'none';
@@ -188,7 +191,6 @@
     const sample = fieldSamples[fieldKey] || '';
     const spec = templateJson.fields?.[fieldKey]?.filter || null;
     const filtered = applyFilter(sample, spec);
-    if (mapperRaw) mapperRaw.textContent = sample || '—';
     if (mapperFiltered) mapperFiltered.textContent = filtered || '—';
   }
 
@@ -413,6 +415,14 @@
   });
   previewEl?.addEventListener('load', () => {
     attachPreviewClickHandler();
+    const doc = previewEl.contentDocument;
+    if (doc) {
+      doc.addEventListener('mouseup', () => {
+        if (filterSelect?.value === 'highlight_text') {
+          handleHighlightFilter();
+        }
+      });
+    }
   });
   document.querySelectorAll('input[name="html_mapper_field"]').forEach((radio) => {
     radio.addEventListener('change', (event) => {
@@ -435,6 +445,9 @@
       ...(templateJson.fields[activeFieldKey] || {}),
       filter: { type: selected }
     };
+    if (selected === 'highlight_text') {
+      if (mapperMsg) mapperMsg.textContent = 'Highlight the exact text in the preview.';
+    }
     syncFilterParams(templateJson.fields[activeFieldKey].filter);
     updateFilterPreview(activeFieldKey);
     const sample = fieldSamples[activeFieldKey] || '';
@@ -462,6 +475,41 @@
   };
   filterParamA?.addEventListener('input', paramHandler);
   filterParamB?.addEventListener('input', paramHandler);
+
+  function deriveTokenFilter(raw, selection) {
+    const value = (raw || '').trim();
+    const selected = (selection || '').trim();
+    if (!value || !selected) return null;
+    const idx = value.indexOf(selected);
+    if (idx === -1) return null;
+    const leftContext = value.slice(0, idx).trim();
+    const rightContext = value.slice(idx + selected.length).trim();
+    const leftToken = leftContext.slice(-20).trim();
+    const rightToken = rightContext.slice(0, 20).trim();
+    if (!leftToken || !rightToken) return null;
+    return { type: 'between_tokens', left: leftToken, right: rightToken };
+  }
+
+  function handleHighlightFilter() {
+    if (!activeFieldKey) return;
+    const doc = previewEl?.contentDocument;
+    if (!doc) return;
+    const selection = doc.getSelection ? doc.getSelection() : null;
+    const selectedText = (selection?.toString() || '').trim();
+    if (!selectedText) return;
+    const sample = fieldSamples[activeFieldKey] || '';
+    const derived = deriveTokenFilter(sample, selectedText);
+    if (!derived) return;
+    templateJson.fields[activeFieldKey] = {
+      ...(templateJson.fields[activeFieldKey] || {}),
+      filter: derived
+    };
+    setFilterSelect(derived);
+    updateFilterPreview(activeFieldKey);
+    const filtered = applyFilter(sample, derived);
+    updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
+    if (mapperMsg) mapperMsg.textContent = 'Filter created from highlight.';
+  }
   mapperSaveBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
     if (mapperMsg) mapperMsg.textContent = 'Saving mapping…';
