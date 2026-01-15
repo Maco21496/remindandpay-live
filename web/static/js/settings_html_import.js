@@ -185,6 +185,26 @@
     return (node.textContent || '').trim().replace(/\s+/g, ' ');
   }
 
+  function findBestElementForSelection(doc, root, selectionText) {
+    if (!doc || !root) return null;
+    const normalized = (selectionText || '').trim().replace(/\s+/g, ' ');
+    if (!normalized) return null;
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    let best = null;
+    let bestLen = Infinity;
+    while (walker.nextNode()) {
+      const el = walker.currentNode;
+      const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (!text || !text.includes(normalized)) continue;
+      if (text.length < bestLen) {
+        best = el;
+        bestLen = text.length;
+        if (bestLen === normalized.length) break;
+      }
+    }
+    return best;
+  }
+
   function attachPreviewClickHandler() {
     if (!previewEl) return;
     const doc = previewEl.contentDocument;
@@ -215,7 +235,11 @@
       }
     }
     clearSelectedElementHighlight();
-    const chosenElement = selectionElement || target;
+    let chosenElement = selectionElement || target;
+    if (selectionText && doc) {
+      const refined = findBestElementForSelection(doc, chosenElement, selectionText);
+      if (refined) chosenElement = refined;
+    }
     chosenElement.style.outline = '2px solid #6366f1';
     lastSelectedEl = chosenElement;
     const rawText = selectionText || (chosenElement.textContent || '');
