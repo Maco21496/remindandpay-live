@@ -143,9 +143,29 @@
         </div>
 
         <div class="subpanel" style="padding:12px; margin-bottom:10px;">
-          <div style="font-weight:600;">Step 3 — Save mapping</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">Save the field mappings once you have captured the values.</div>
-          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+          <div style="font-weight:600;">Step 3 — Filter + save</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">
+            Choose a filter so only the value you need is stored.
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label for="html_filter_select" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+              Filter
+            </label>
+            <select id="html_filter_select" style="height:32px; padding:0 8px; width:100%;">
+              <option value="none">No filter</option>
+              <option value="digits_only">Numbers only</option>
+              <option value="amount">Amount</option>
+              <option value="date">Date</option>
+              <option value="strip_parentheses">Strip parentheses</option>
+            </select>
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:8px;">
+            Raw: <span id="html_mapper_raw">—</span>
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Filtered: <span id="html_mapper_filtered">—</span>
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:10px;">
             <button id="html_mapper_save" class="btn btn--subtle" type="button">Save mapping</button>
             <span id="html_mapper_msg" class="muted" style="font-size:12px;"></span>
           </div>

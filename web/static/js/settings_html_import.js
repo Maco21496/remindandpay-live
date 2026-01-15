@@ -16,12 +16,16 @@
   const sampleEditor = document.getElementById('html_sample_editor');
   const mapperSaveBtn = document.getElementById('html_mapper_save');
   const mapperMsg = document.getElementById('html_mapper_msg');
+  const filterSelect = document.getElementById('html_filter_select');
+  const mapperRaw = document.getElementById('html_mapper_raw');
+  const mapperFiltered = document.getElementById('html_mapper_filtered');
   let activeTemplateName = '';
   let sampleMode = 'email';
   let lastEmailHtml = '';
   let templateJson = { fields: {} };
   let activeFieldKey = '';
   let lastSelectedEl = null;
+  const fieldSamples = {};
 
   function setActiveTemplate(name) {
     activeTemplateName = (name || '').trim();
@@ -95,6 +99,42 @@
     return null;
   }
 
+  function applyFilter(raw, filterSpec) {
+    const value = (raw || '').trim();
+    if (!filterSpec || !filterSpec.type || filterSpec.type === 'none') return value;
+    if (filterSpec.type === 'digits_only') return value.replace(/\D+/g, '');
+    if (filterSpec.type === 'amount') {
+      const match = value.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/);
+      if (!match) return value;
+      const num = parseFloat(match[1].replace(/,/g, ''));
+      return Number.isFinite(num) ? num.toFixed(2) : match[1];
+    }
+    if (filterSpec.type === 'date') {
+      const match = value.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/i)
+        || value.match(/\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b/i);
+      return match ? match[0] : value;
+    }
+    if (filterSpec.type === 'strip_parentheses') {
+      return value.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    }
+    return value;
+  }
+
+  function setFilterSelect(filterSpec) {
+    if (!filterSelect) return;
+    const value = filterSpec?.type || 'none';
+    filterSelect.value = value;
+  }
+
+  function updateFilterPreview(fieldKey) {
+    if (!fieldKey) return;
+    const sample = fieldSamples[fieldKey] || '';
+    const spec = templateJson.fields?.[fieldKey]?.filter || null;
+    const filtered = applyFilter(sample, spec);
+    if (mapperRaw) mapperRaw.textContent = sample || '—';
+    if (mapperFiltered) mapperFiltered.textContent = filtered || '—';
+  }
+
   function clearSelectedElementHighlight() {
     if (lastSelectedEl) {
       lastSelectedEl.style.outline = '';
@@ -142,13 +182,18 @@
     lastSelectedEl = target;
     const textValue = (target.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120);
     const path = buildElementPath(target);
+    const defaultFilter = filterForField(activeFieldKey);
     templateJson.fields[activeFieldKey] = {
       type: 'dom',
       path,
       attr: 'text',
-      filter: filterForField(activeFieldKey)
+      filter: templateJson.fields?.[activeFieldKey]?.filter || defaultFilter
     };
-    updateFieldBadge(activeFieldKey, textValue || '(selected)');
+    fieldSamples[activeFieldKey] = textValue;
+    const displayValue = applyFilter(textValue, templateJson.fields[activeFieldKey].filter);
+    updateFieldBadge(activeFieldKey, displayValue || textValue || '(selected)');
+    setFilterSelect(templateJson.fields[activeFieldKey].filter);
+    updateFilterPreview(activeFieldKey);
     if (mapperMsg) mapperMsg.textContent = `Captured ${activeFieldKey.replace('_', ' ')}.`;
   }
 
@@ -199,6 +244,7 @@
       Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
         updateFieldBadge(fieldKey, 'mapped');
       });
+      updateFilterPreview(activeFieldKey);
       updateSampleMode(sampleMode);
     } catch (err) {
       console.error('Failed to load HTML template', err);
@@ -284,8 +330,28 @@
   document.querySelectorAll('input[name="html_mapper_field"]').forEach((radio) => {
     radio.addEventListener('change', (event) => {
       activeFieldKey = event.target.value;
+      const existing = templateJson.fields?.[activeFieldKey]?.filter || filterForField(activeFieldKey);
+      if (!templateJson.fields[activeFieldKey]) {
+        templateJson.fields[activeFieldKey] = { filter: existing };
+      } else if (!templateJson.fields[activeFieldKey].filter && existing) {
+        templateJson.fields[activeFieldKey].filter = existing;
+      }
+      setFilterSelect(templateJson.fields[activeFieldKey]?.filter || null);
+      updateFilterPreview(activeFieldKey);
       if (mapperMsg) mapperMsg.textContent = 'Click a value in the HTML preview.';
     });
+  });
+  filterSelect?.addEventListener('change', () => {
+    if (!activeFieldKey) return;
+    const selected = filterSelect.value || 'none';
+    templateJson.fields[activeFieldKey] = {
+      ...(templateJson.fields[activeFieldKey] || {}),
+      filter: { type: selected }
+    };
+    updateFilterPreview(activeFieldKey);
+    const sample = fieldSamples[activeFieldKey] || '';
+    const filtered = applyFilter(sample, templateJson.fields[activeFieldKey].filter);
+    updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
   });
   mapperSaveBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
