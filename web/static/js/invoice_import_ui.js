@@ -45,7 +45,12 @@
 
   // ---------- Active template dropdown helper ----------
 
-  async function loadActiveTemplates(selectedName) {
+  function getTemplateEndpoint(reader) {
+    if (reader === 'html') return '/api/inbound/html/templates';
+    return '/api/inbound/blocks/templates';
+  }
+
+  async function loadActiveTemplates(selectedName, reader) {
     if (!iiBlockTemplate) return;
 
     // Reset options
@@ -56,14 +61,15 @@
     iiBlockTemplate.appendChild(optNone);
 
     try {
-      const r = await fetch('/api/inbound/blocks/templates', {
+      const endpoint = getTemplateEndpoint(reader);
+      const r = await fetch(endpoint, {
         method: 'GET',
         cache: 'no-store'
       });
       if (!r.ok) {
         let detail = '';
         try { detail = await r.text(); } catch {}
-        console.error('GET /api/inbound/blocks/templates failed', r.status, detail);
+        console.error('GET templates failed', r.status, detail);
         return;
       }
       const j = await r.json();
@@ -123,8 +129,8 @@
           ? j.inbound_block_template_name
           : '').trim();
 
-      // Populate dropdown from /api/inbound/blocks/templates and select the saved name
-      await loadActiveTemplates(savedTemplateName);
+      // Populate dropdown from the correct templates endpoint and select the saved name
+      await loadActiveTemplates(savedTemplateName, (j.inbound_reader || 'pdf'));
 
       if (iiActive) iiActive.checked = !!j.inbound_active;
       if (iiMsg) iiMsg.textContent = '';
@@ -192,6 +198,13 @@
     if (!iiAddress || !iiAddress.value) return;
     iiAddress.select();
     document.execCommand('copy');
+  }
+
+  function handleReaderChange() {
+    const reader =
+      [...document.querySelectorAll('input[name="ii_reader"]')]
+        .find(r => r.checked)?.value || 'pdf';
+    loadActiveTemplates(iiBlockTemplate?.value || '', reader);
   }
 
   // ---------- Inline manual editor helpers (existing preview UI) ----------
@@ -646,7 +659,10 @@
   iiGenerate?.addEventListener('click', generate);
   iiCopy?.addEventListener('click', copyAddr);
   iiActive?.addEventListener('change', save);
-  document.querySelectorAll('input[name="ii_reader"]').forEach(r => r.addEventListener('change', save));
+  document.querySelectorAll('input[name="ii_reader"]').forEach(r => r.addEventListener('change', () => {
+    handleReaderChange();
+    save();
+  }));
   iiBlockTemplate?.addEventListener('change', save);
   iiPdfBtn?.addEventListener('click', previewPdf);
   iiLineBtn?.addEventListener('click', lineExtract);

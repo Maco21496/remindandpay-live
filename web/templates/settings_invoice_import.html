@@ -449,16 +449,6 @@
       </div>
     </div>
 
-    <!-- SUBTAB: HTML INVOICES (placeholder for future reader) -->
-    <div id="ii_subtab_html" class="ii-subtab-section" style="margin-top:4px; display:none;">
-      <div class="subpanel" style="padding:12px;">
-        <h3 style="margin-top:0; font-size:16px;">HTML invoice mapping</h3>
-        <p class="muted" style="margin-top:4px;">
-          HTML invoice mapping will go here. For now, invoice import will only use the PDF visual mapper.
-        </p>
-      </div>
-    </div>
-
   </div>
 </section>
 
@@ -504,13 +494,11 @@
 
     const secSettings = document.getElementById('ii_subtab_settings');
     const secPdf      = document.getElementById('ii_subtab_pdf');
-    const secHtml     = document.getElementById('ii_subtab_html');
 
     function showSubtab(name) {
-      if (!secSettings || !secPdf || !secHtml) return;
+      if (!secSettings || !secPdf) return;
       secSettings.style.display = (name === 'settings') ? 'block' : 'none';
       secPdf.style.display      = (name === 'pdf')      ? 'block' : 'none';
-      secHtml.style.display     = (name === 'html')     ? 'block' : 'none';
     }
 
     // default matches the "Settings" button
@@ -521,6 +509,10 @@
       if (!btn) return;
       const which = btn.dataset.subtab;
       if (!which) return;
+      if (which === 'html') {
+        window.location.href = '/settings/html-import';
+        return;
+      }
 
       bar.querySelectorAll('.tab').forEach(t => t.classList.remove('is-active'));
       btn.classList.add('is-active');
