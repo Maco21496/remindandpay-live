@@ -348,8 +348,19 @@
         const filteredValue = applyFilter(rawValue, spec?.filter);
         updateFieldBadge(fieldKey, filteredValue || rawValue || '');
       });
-      updateFilterPreview(activeFieldKey);
       updateSampleMode(sampleMode);
+      previewEl?.addEventListener('load', () => {
+        clearFieldBadges();
+        Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
+          const spec = templateJson.fields[fieldKey];
+          if (!spec || !spec.path) return;
+          const rawValue = getValueFromSpec(spec);
+          fieldSamples[fieldKey] = rawValue;
+          const filteredValue = applyFilter(rawValue, spec?.filter);
+          updateFieldBadge(fieldKey, filteredValue || rawValue || '');
+        });
+        updateFilterPreview(activeFieldKey);
+      }, { once: true });
     } catch (err) {
       console.error('Failed to load HTML template', err);
     }
