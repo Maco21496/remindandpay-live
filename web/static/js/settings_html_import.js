@@ -24,6 +24,8 @@
   const filterHint = document.getElementById('html_filter_hint');
   const mapperFiltered = document.getElementById('html_mapper_filtered');
   const step2Panel = document.getElementById('html_step2');
+  const step2Body = document.getElementById('html_step2_body');
+  const step2Controls = document.getElementById('html_step2_controls');
   let activeTemplateName = '';
   let sampleMode = 'email';
   let lastEmailHtml = '';
@@ -97,8 +99,9 @@
   }
 
   function setStep2Visible(visible) {
-    if (!step2Panel) return;
-    step2Panel.style.display = visible ? '' : 'none';
+    if (!step2Body || !step2Controls) return;
+    step2Body.style.display = visible ? 'none' : '';
+    step2Controls.style.display = visible ? '' : 'none';
   }
 
   function filterForField(fieldKey) {
