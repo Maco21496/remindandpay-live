@@ -98,6 +98,12 @@
     el.textContent = value ? `→ ${value}` : '';
   }
 
+  function clearFieldBadges() {
+    ['invoice_number', 'issue_date', 'due_date', 'amount_due', 'customer_name'].forEach((key) => {
+      updateFieldBadge(key, '');
+    });
+  }
+
   function setStep2Visible(visible) {
     if (!step2Body || !step2Controls) return;
     step2Body.style.display = visible ? 'none' : '';
@@ -313,6 +319,7 @@
         setSubjectToken('');
         lastEmailHtml = '';
         setTemplateJson({ fields: {} });
+        clearFieldBadges();
         updateSampleMode(sampleMode);
       }
     } catch (err) {
@@ -332,12 +339,14 @@
       setActiveTemplate(data.template_name || name);
       lastEmailHtml = data.html_email_body || '';
       setTemplateJson(data.template_json || {});
+      clearFieldBadges();
       Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
         const spec = templateJson.fields[fieldKey];
+        if (!spec || !spec.path) return;
         const rawValue = getValueFromSpec(spec);
         fieldSamples[fieldKey] = rawValue;
         const filteredValue = applyFilter(rawValue, spec?.filter);
-        updateFieldBadge(fieldKey, filteredValue || rawValue || 'mapped');
+        updateFieldBadge(fieldKey, filteredValue || rawValue || '');
       });
       updateFilterPreview(activeFieldKey);
       updateSampleMode(sampleMode);
