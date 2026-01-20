@@ -106,10 +106,9 @@
   function applyFilter(raw, filterSpec) {
     const value = (raw || '').trim();
     if (!filterSpec || !filterSpec.type || filterSpec.type === 'none') return value;
-    if (filterSpec.type === 'digits_only') return value.replace(/\D+/g, '');
-    if (filterSpec.type === 'amount') {
+    if (filterSpec.type === 'digits_only') {
       const match = value.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/);
-      if (!match) return value;
+      if (!match) return value.replace(/\D+/g, '');
       const num = parseFloat(match[1].replace(/,/g, ''));
       return Number.isFinite(num) ? num.toFixed(2) : match[1];
     }
@@ -117,9 +116,6 @@
       const match = value.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/i)
         || value.match(/\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b/i);
       return match ? match[0] : value;
-    }
-    if (filterSpec.type === 'strip_parentheses') {
-      return value.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
     }
     if (filterSpec.type === 'after_token' && filterSpec.token) {
       const parts = value.split(filterSpec.token);
@@ -163,10 +159,9 @@
     if (filterHint) {
       filterHint.style.display = type === 'highlight_text' ? 'block' : 'none';
     }
-    filterParamA.style.display = (type === 'after_token' || type === 'before_token' || type === 'between_tokens' || type === 'regex')
-      ? 'block'
-      : 'none';
-    filterParamB.style.display = (type === 'between_tokens' || type === 'regex') ? 'block' : 'none';
+    filterParamWrap.style.display = 'none';
+    filterParamA.style.display = 'none';
+    filterParamB.style.display = 'none';
     if (type === 'after_token' || type === 'before_token') {
       filterParamA.placeholder = 'Token';
       filterParamA.value = filterSpec?.token || '';
@@ -453,6 +448,9 @@
     };
     if (selected === 'highlight_text') {
       if (mapperMsg) mapperMsg.textContent = 'Highlight the exact text in the preview.';
+      if (filterApplyBtn) filterApplyBtn.parentElement.style.display = '';
+    } else if (filterApplyBtn) {
+      filterApplyBtn.parentElement.style.display = 'none';
     }
     syncFilterParams(templateJson.fields[activeFieldKey].filter);
     updateFilterPreview(activeFieldKey);

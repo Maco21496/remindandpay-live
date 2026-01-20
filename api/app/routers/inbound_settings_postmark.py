@@ -861,6 +861,20 @@ async def postmark_inbound(
         else:
             tpl = None
 
+    if reader == "html":
+        # HTML reader: extract from email body (ignore attachments)
+        extracted_text: Optional[str] = None
+        html_body = data.get("HtmlBody") or ""
+        text_body = data.get("TextBody") or ""
+
+        active_tpl_name = (
+            getattr(row, "inbound_block_template_name", None) or ""
+        ).strip() or None
+        if active_tpl_name:
+            tpl = _load_html_template_for_user(db, user_id_int, active_tpl_name)
+        else:
+            tpl = None
+
         if tpl:
             if html_body:
                 text_for_extract = _html_to_text(html_body)
