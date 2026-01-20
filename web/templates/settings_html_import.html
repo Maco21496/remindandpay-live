@@ -110,6 +110,9 @@
         </div>
         <div id="html_mapper_fields" class="subpanel" style="padding:12px; margin-bottom:12px;">
           <div style="font-weight:600; margin-bottom:8px;">Step 1 — Choose field</div>
+          <div id="html_step1_hint" class="muted" style="font-size:12px; margin-bottom:8px;">
+            Choose a field, then click the value you want to map in the preview.
+          </div>
           <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
             <input type="radio" name="html_mapper_field" value="invoice_number">
             <span>Invoice number</span>
@@ -137,17 +140,8 @@
           </label>
         </div>
 
-        <div class="subpanel" style="padding:12px; margin-bottom:10px;">
-          <div style="font-weight:600;">Step 2 — Click value</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">Click the value in the HTML preview to capture its selector.</div>
-          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
-            <button id="html_step2_done" class="btn btn--ghost" type="button">Next: filter result</button>
-            <span class="muted" style="font-size:12px;">Continue after clicking a value.</span>
-          </div>
-        </div>
-
-        <div id="html_step3" class="subpanel" style="padding:12px; margin-bottom:10px; display:none;">
-          <div style="font-weight:600;">Step 3 — Filter + save</div>
+        <div id="html_step2" class="subpanel" style="padding:12px; margin-bottom:10px; display:none;">
+          <div style="font-weight:600;">Step 2 — Filter + save</div>
           <div class="muted" style="margin-top:4px; font-size:12px;">
             Choose a filter so only the value you need is stored.
           </div>
