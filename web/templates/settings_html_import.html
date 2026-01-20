@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% set title = "HTML invoice import — Remind & Pay" %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/settings.css">
+
+<h1>Settings</h1>
+
+<nav id="set_tabs" class="tabbar" style="margin:0 0 12px 0;">
+  <button class="tab" data-tab="app">App settings</button>
+  <button class="tab" data-tab="email">Email settings</button>
+  <button class="tab is-active" data-tab="import">Invoice import</button>
+  <button class="tab" data-tab="restore">Restore defaults</button>
+  <div style="flex:1"></div>
+</nav>
+
+<section class="panel panel--wide" style="margin-top:12px;">
+  <div class="panel__head">
+    <h2>Invoice import settings</h2>
+
+    <nav id="ii_subtabs" class="tabbar" style="margin-top:8px;">
+      <button class="tab" data-subtab="settings">Settings</button>
+      <button class="tab" data-subtab="pdf">PDF invoices</button>
+      <button class="tab is-active" data-subtab="html">HTML invoices</button>
+    </nav>
+  </div>
+
+  <div class="content" style="padding:12px;">
+    <div style="display:grid; grid-template-columns:260px 320px 1fr; gap:16px; align-items:flex-start;">
+
+      <!-- LEFT COLUMN: template list + create -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="margin-bottom:8px;">
+          <div style="font-weight:600;">HTML templates</div>
+          <div class="muted" style="font-size:12px;">Step 1: create or select a template.</div>
+        </div>
+
+        <div class="field" style="margin-bottom:8px;">
+          <label for="html_template_name" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+            Template name
+          </label>
+          <input id="html_template_name" type="text" placeholder="e.g. HTML invoice template" style="height:32px; padding:0 8px; width:100%;">
+        </div>
+
+        <button id="html_template_create" class="btn" type="button" style="width:100%; margin-bottom:10px;">
+          Create template
+        </button>
+
+        <div class="field">
+          <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+            Saved templates
+          </label>
+          <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
+            <option value="">(choose template)</option>
+          </select>
+          <div class="muted" style="font-size:12px; margin-top:4px;">Select a template to load its saved HTML sample.</div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
+          <div style="font-weight:600; margin-bottom:6px;">Template subject</div>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">
+            Default option: forward an example invoice email to your import address with this subject line. If your mail client won’t
+            keep the subject, paste this token on the first line of the email body instead.
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center;">
+            <input id="html_subject_token" readonly style="height:32px; padding:0 8px; flex:1;">
+            <button id="html_subject_copy" class="btn btn--subtle" type="button">Copy</button>
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+            <button id="html_subject_refresh" class="btn btn--ghost" type="button">Refresh preview</button>
+            <span class="muted" style="font-size:12px;">Wait ~10 seconds after forwarding, then refresh.</span>
+          </div>
+        </div>
+
+        <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
+          <div style="font-weight:600; margin-bottom:6px;">HTML sample source</div>
+          <div class="muted" style="font-size:12px; margin-bottom:8px;">
+            Choose how you want to load the HTML preview. The default option is to forward a test email.
+          </div>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_sample_mode" id="html_sample_mode_email" value="email" checked>
+            <span class="muted" style="font-size:12px;">Use forwarded test email (recommended).</span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:8px;">
+            <input type="radio" name="html_sample_mode" id="html_sample_mode_paste" value="paste">
+            <span class="muted" style="font-size:12px;">Paste raw HTML (advanced).</span>
+          </label>
+
+          <div id="html_sample_editor" style="margin-top:8px;">
+            <div class="muted" style="font-size:12px; margin-bottom:6px;">Paste the HTML email body and save it to the template.</div>
+            <textarea
+              id="html_invoice_body"
+              rows="10"
+              placeholder="Paste HTML email body here..."
+              style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
+            ></textarea>
+            <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+              <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
+              <button id="html_invoice_edit" class="btn btn--subtle" type="button" style="display:none;">Edit HTML sample</button>
+              <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIDDLE COLUMN: mapping steps -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">HTML mapping steps</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">
+          Step 1: pick the field you want to map, then click the matching value in the HTML preview.
+        </div>
+        <div id="html_mapper_fields" class="subpanel" style="padding:12px; margin-bottom:12px;">
+          <div style="font-weight:600; margin-bottom:8px;">Step 1 — Choose field</div>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="invoice_number">
+            <span>Invoice number</span>
+            <span id="html_field_value_invoice_number" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="issue_date">
+            <span>Invoice date</span>
+            <span id="html_field_value_issue_date" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="due_date">
+            <span>Due date</span>
+            <span id="html_field_value_due_date" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="radio" name="html_mapper_field" value="amount_due">
+            <span>Amount due</span>
+            <span id="html_field_value_amount_due" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+          <label class="field-row" style="gap:8px; align-items:center;">
+            <input type="radio" name="html_mapper_field" value="customer_name">
+            <span>Customer name</span>
+            <span id="html_field_value_customer_name" class="muted" style="margin-left:auto; font-size:12px;"></span>
+          </label>
+        </div>
+
+        <div class="subpanel" style="padding:12px; margin-bottom:10px;">
+          <div style="font-weight:600;">Step 2 — Click value</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">Click the value in the HTML preview to capture its selector.</div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+            <button id="html_step2_done" class="btn btn--ghost" type="button">Next: filter result</button>
+            <span class="muted" style="font-size:12px;">Continue after clicking a value.</span>
+          </div>
+        </div>
+
+        <div id="html_step3" class="subpanel" style="padding:12px; margin-bottom:10px; display:none;">
+          <div style="font-weight:600;">Step 3 — Filter + save</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">
+            Choose a filter so only the value you need is stored.
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label for="html_filter_select" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
+              Filter
+            </label>
+            <select id="html_filter_select" style="height:32px; padding:0 8px; width:100%;">
+              <option value="none">No filter</option>
+              <option value="digits_only">Numbers only</option>
+              <option value="date">Date</option>
+              <option value="highlight_text">Use highlighted text</option>
+            </select>
+          </div>
+          <div id="html_filter_hint" class="muted" style="font-size:12px; margin-top:6px; display:none;">
+            Highlight the exact text in the HTML preview to auto-build the filter.
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:8px; display:none;">
+            <button id="html_filter_apply" class="btn btn--ghost" type="button">Apply highlight</button>
+            <span class="muted" style="font-size:12px;">Use after selecting Highlight text.</span>
+          </div>
+          <div id="html_filter_params" style="margin-top:8px; display:none;">
+            <input id="html_filter_param_a" type="text" placeholder="Token / regex" style="height:32px; padding:0 8px; width:100%; margin-bottom:6px;">
+            <input id="html_filter_param_b" type="text" placeholder="Second token / regex group" style="height:32px; padding:0 8px; width:100%; display:none;">
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Mapped result: <strong id="html_mapper_filtered">—</strong>
+          </div>
+          <div class="field-row" style="gap:8px; align-items:center; margin-top:10px;">
+            <button id="html_mapper_save" class="btn btn--subtle" type="button">Save mapping</button>
+            <span id="html_mapper_msg" class="muted" style="font-size:12px;"></span>
+          </div>
+        </div>
+
+        
+      </div>
+
+      <!-- RIGHT COLUMN: HTML preview -->
+      <div class="subpanel" style="padding:12px;">
+        <div style="font-weight:600; margin-bottom:8px;">HTML preview</div>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">Step 3: select values directly in the rendered HTML.</div>
+        <iframe
+          id="html_preview"
+          title="HTML preview"
+          style="border:1px solid #e5e7eb; border-radius:8px; background:#fff; min-height:420px; width:100%;"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function(){
+    const tabs = document.getElementById('set_tabs');
+    if (!tabs) return;
+
+    tabs.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.tab;
+
+      if (which === 'import') {
+        return;
+      } else if (which === 'app') {
+        window.location.href = '/settings';
+      } else if (which === 'email') {
+        window.location.href = '/settings';
+      } else if (which === 'restore') {
+        window.location.href = '/settings';
+      }
+    });
+  })();
+</script>
+
+<script src="/static/js/settings_html_import.js"></script>
+
+<script>
+  (function () {
+    const bar = document.getElementById('ii_subtabs');
+    if (!bar) return;
+
+    bar.addEventListener('click', function (e) {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      const which = btn.dataset.subtab;
+      if (!which) return;
+
+      if (which === 'settings') {
+        window.location.href = '/settings/invoice-import';
+        return;
+      }
+
+      if (which === 'pdf') {
+        window.location.href = '/settings/invoice-import';
+        return;
+      }
+
+      if (which === 'html') {
+        return;
+      }
+    });
+  })();
+</script>
+
+{% endblock %}
