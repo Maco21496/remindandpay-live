@@ -26,6 +26,8 @@
   const step2Panel = document.getElementById('html_step2');
   const step2Body = document.getElementById('html_step2_body');
   const step2Controls = document.getElementById('html_step2_controls');
+  const step1Panel = document.getElementById('html_step1_panel');
+  const step1Hint = document.getElementById('html_step1_hint');
   let activeTemplateName = '';
   let sampleMode = 'email';
   let lastEmailHtml = '';
@@ -104,10 +106,18 @@
     });
   }
 
+  function setPreviewFocus(active) {
+    if (!previewEl) return;
+    previewEl.style.boxShadow = active ? '0 0 0 3px rgba(99,102,241,0.35)' : '';
+  }
+
   function setStep2Visible(visible) {
-    if (!step2Body || !step2Controls) return;
+    if (!step2Panel || !step2Body || !step2Controls) return;
+    step2Panel.style.display = visible ? '' : 'none';
     step2Body.style.display = visible ? 'none' : '';
     step2Controls.style.display = visible ? '' : 'none';
+    if (step1Panel) step1Panel.style.opacity = visible ? '0.6' : '1';
+    setPreviewFocus(!visible);
   }
 
   function filterForField(fieldKey) {
@@ -289,6 +299,7 @@
     const displayValue = applyFilter(textValue, templateJson.fields[activeFieldKey].filter);
     updateFieldBadge(activeFieldKey, displayValue || textValue || '(selected)');
     setFilterSelect(templateJson.fields[activeFieldKey].filter);
+    if (filterSelect && !filterSelect.value) filterSelect.value = 'none';
     updateFilterPreview(activeFieldKey);
     setStep2Visible(true);
     if (mapperMsg) mapperMsg.textContent = `Captured ${activeFieldKey.replace('_', ' ')}.`;
@@ -467,6 +478,7 @@
       setFilterSelect(templateJson.fields[activeFieldKey]?.filter || null);
       updateFilterPreview(activeFieldKey);
       setStep2Visible(false);
+      if (step1Hint) step1Hint.textContent = 'Now click the value you want to map in the preview.';
       if (mapperMsg) mapperMsg.textContent = 'Click a value in the HTML preview.';
     });
   });
