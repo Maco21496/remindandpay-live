@@ -131,6 +131,7 @@
   function applyFilter(raw, filterSpec) {
     const value = (raw || '').trim();
     if (!filterSpec || !filterSpec.type || filterSpec.type === 'none') return value;
+    if (filterSpec.type === 'highlight_text') return '';
     if (filterSpec.type === 'digits_only') {
       const match = value.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/);
       if (!match) return value.replace(/\D+/g, '');
@@ -575,7 +576,7 @@
     };
     setFilterSelect(derived);
     updateFilterPreview(activeFieldKey);
-    const filtered = applyFilter(sample, derived);
+    const filtered = selectedText.trim();
     updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
     if (mapperMsg) mapperMsg.textContent = 'Filter created from highlight.';
   }
