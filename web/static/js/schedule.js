@@ -1147,8 +1147,23 @@ document.addEventListener("click", (e) => {
       if (chSeqDefault) chSeqDefault.disabled = !enabled;
 
       await updateChasingExclSummary();
+      await loadChasingDeliveryMode();
     } catch (e) {
       console.error("loadChasingGlobals failed", e);
+    }
+  }
+
+  async function loadChasingDeliveryMode() {
+    if (!chDelivery && !chSNMode) return;
+    try {
+      const r = await fetch("/api/sms/settings", { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      const mode = data.delivery_mode || "email";
+      if (chDelivery) setSelectValue(chDelivery, mode);
+      if (chSNMode) setSelectValue(chSNMode, mode);
+    } catch (e) {
+      console.error("loadChasingDeliveryMode failed", e);
     }
   }
 
@@ -1172,6 +1187,14 @@ document.addEventListener("click", (e) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+
+      if (chDelivery) {
+        await safeFetch("/api/sms/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ delivery_mode: chDelivery.value }),
+        });
+      }
 
       flashSaved(chSaveBtn, true, "Saved ✓");
     } catch (e) {
