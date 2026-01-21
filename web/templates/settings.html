@@ -197,14 +197,6 @@
             </select>
           </div>
           <div class="field">
-            <label>Default delivery mode</label>
-            <select id="sms_delivery_mode" style="height:36px;padding:0 8px;">
-              <option value="email">Email only</option>
-              <option value="sms">SMS only</option>
-              <option value="both">Email + SMS</option>
-            </select>
-          </div>
-          <div class="field">
             <label>SMS bundle size</label>
             <input id="sms_bundle_size" type="number" min="100" step="100" value="1000" style="height:36px;padding:0 8px;">
             <div class="muted" style="margin-top:4px;">Used for credit top-ups (e.g. 1000 SMS).</div>
@@ -218,25 +210,16 @@
       </div>
 
       <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
-        <h3 style="margin:0 0 10px 0; font-size:16px;">Twilio credentials</h3>
+        <h3 style="margin:0 0 10px 0; font-size:16px;">Dedicated number</h3>
         <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
           <div class="field">
-            <label>Twilio Account SID</label>
-            <input id="sms_account_sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="height:36px;padding:0 8px;">
-            <div id="sms_account_hint" class="muted" style="margin-top:4px;"></div>
-          </div>
-          <div class="field">
-            <label>Twilio Auth Token</label>
-            <input id="sms_auth_token" type="password" placeholder="••••••••••••••••••••" style="height:36px;padding:0 8px;">
-            <div id="sms_auth_hint" class="muted" style="margin-top:4px;"></div>
-          </div>
-          <div class="field">
             <label>Twilio phone number</label>
-            <input id="sms_phone_number" placeholder="+44..." style="height:36px;padding:0 8px;">
+            <input id="sms_phone_number" placeholder="+44..." style="height:36px;padding:0 8px;" disabled>
+            <div class="muted" style="margin-top:4px;">Provisioned automatically when SMS is enabled.</div>
           </div>
           <div class="field">
             <label>Twilio phone SID</label>
-            <input id="sms_phone_sid" placeholder="PNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="height:36px;padding:0 8px;">
+            <input id="sms_phone_sid" placeholder="PNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="height:36px;padding:0 8px;" disabled>
           </div>
         </div>
       </div>

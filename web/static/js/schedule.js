@@ -1134,6 +1134,12 @@ document.addEventListener("click", (e) => {
       setSelectValue(chEnabled, enabled ? "true" : "false");
       setSelectValue(chHour, hourOpt);
       if (chDelivery) chDelivery.disabled = !enabled;
+      if (chDelivery && data.delivery_mode) {
+        setSelectValue(chDelivery, data.delivery_mode);
+      }
+      if (chSNMode && data.delivery_mode) {
+        setSelectValue(chSNMode, data.delivery_mode);
+      }
 
       const want = data.default_sequence_id;
       const has = seqs.some((s) => String(s.id) === String(want));
@@ -1169,7 +1175,12 @@ document.addEventListener("click", (e) => {
       const default_sequence_id =
         enabled && raw !== "" && raw != null ? Number(raw) : null;
 
-      const body = { enabled, hour, default_sequence_id };
+      const body = {
+        enabled,
+        hour,
+        default_sequence_id,
+        delivery_mode: chDelivery?.value || "email",
+      };
 
       await safeFetch("/api/chasing_reminders/globals", {
         method: "POST",
@@ -1239,9 +1250,15 @@ document.addEventListener("click", (e) => {
       const excludedSet = new Set(
         (excludedRows || []).map((x) => x.customer_id)
       );
-      const eligible = (customers || []).filter(
-        (c) => (c.email || "").trim() && !excludedSet.has(c.id)
-      );
+      const mode = (chSNMode?.value || chDelivery?.value || "email").toLowerCase();
+      const eligible = (customers || []).filter((c) => {
+        if (excludedSet.has(c.id)) return false;
+        const hasEmail = (c.email || "").trim().length > 0;
+        const hasPhone = (c.phone || "").trim().length > 0;
+        if (mode === "sms") return hasPhone;
+        if (mode === "both") return hasEmail || hasPhone;
+        return hasEmail;
+      });
 
       // start with previous selection or "all"
       let workingSel = chSNSelected

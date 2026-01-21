@@ -5,19 +5,14 @@ from fastapi import Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..shared import APIRouter, HTTPException
+from ..shared import APIRouter
 from ..database import get_db
 from ..models import AccountSmsSettings
 from .auth import require_user
-from ..crypto_secrets import encrypt_secret
-
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
-
-DELIVERY_MODES = {"email", "sms", "both"}
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
-    delivery_mode: str
     twilio_phone_number: Optional[str] = None
     twilio_phone_sid: Optional[str] = None
     forwarding_enabled: bool
@@ -25,14 +20,9 @@ class SmsSettingsOut(BaseModel):
     bundle_size: int
     credits_balance: int
     free_credits: int
-    has_account_sid: bool
-    has_auth_token: bool
 
 class SmsSettingsIn(BaseModel):
     enabled: Optional[bool] = None
-    delivery_mode: Optional[str] = Field(None, description="email|sms|both")
-    twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None
     twilio_phone_number: Optional[str] = None
     twilio_phone_sid: Optional[str] = None
     forwarding_enabled: Optional[bool] = None
@@ -64,7 +54,6 @@ def get_sms_settings(
     row = _ensure_sms_settings(db, user.id)
     return SmsSettingsOut(
         enabled=bool(row.enabled),
-        delivery_mode=row.delivery_mode or "email",
         twilio_phone_number=row.twilio_phone_number,
         twilio_phone_sid=row.twilio_phone_sid,
         forwarding_enabled=bool(row.forwarding_enabled),
@@ -72,8 +61,6 @@ def get_sms_settings(
         bundle_size=row.bundle_size or 1000,
         credits_balance=row.credits_balance or 0,
         free_credits=row.free_credits or 0,
-        has_account_sid=bool(row.twilio_account_sid_enc),
-        has_auth_token=bool(row.twilio_auth_token_enc),
     )
 
 @router.post("/settings", response_model=SmsSettingsOut)
@@ -83,12 +70,6 @@ def update_sms_settings(
     user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
-
-    if payload.delivery_mode is not None:
-        mode = payload.delivery_mode.lower().strip()
-        if mode not in DELIVERY_MODES:
-            raise HTTPException(400, "delivery_mode must be email, sms, or both")
-        row.delivery_mode = mode
 
     if payload.enabled is not None:
         row.enabled = bool(payload.enabled)
@@ -108,18 +89,6 @@ def update_sms_settings(
     if payload.free_credits is not None:
         row.free_credits = int(payload.free_credits)
 
-    if payload.twilio_account_sid is not None:
-        if payload.twilio_account_sid.strip():
-            row.twilio_account_sid_enc = encrypt_secret(payload.twilio_account_sid.strip())
-        else:
-            row.twilio_account_sid_enc = None
-
-    if payload.twilio_auth_token is not None:
-        if payload.twilio_auth_token.strip():
-            row.twilio_auth_token_enc = encrypt_secret(payload.twilio_auth_token.strip())
-        else:
-            row.twilio_auth_token_enc = None
-
     if payload.twilio_phone_number is not None:
         row.twilio_phone_number = payload.twilio_phone_number.strip() or None
 
@@ -132,7 +101,6 @@ def update_sms_settings(
 
     return SmsSettingsOut(
         enabled=bool(row.enabled),
-        delivery_mode=row.delivery_mode or "email",
         twilio_phone_number=row.twilio_phone_number,
         twilio_phone_sid=row.twilio_phone_sid,
         forwarding_enabled=bool(row.forwarding_enabled),
@@ -140,6 +108,4 @@ def update_sms_settings(
         bundle_size=row.bundle_size or 1000,
         credits_balance=row.credits_balance or 0,
         free_credits=row.free_credits or 0,
-        has_account_sid=bool(row.twilio_account_sid_enc),
-        has_auth_token=bool(row.twilio_auth_token_enc),
     )

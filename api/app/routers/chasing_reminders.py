@@ -245,14 +245,24 @@ def _sent_recently(
     cnt = query.count()
     return cnt > 0
 
-def _get_sms_settings(db: Session, user_id: int) -> tuple[bool, str]:
+def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     row = (
         db.query(AccountSmsSettings)
           .filter(AccountSmsSettings.user_id == user_id)
           .first()
     )
+    if row:
+        return row
+    row = AccountSmsSettings(user_id=user_id)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+def _get_sms_settings(db: Session, user_id: int) -> tuple[bool, str]:
+    row = _ensure_sms_settings(db, user_id)
     enabled = bool(getattr(row, "enabled", False))
-    mode = (getattr(row, "delivery_mode", None) or "email").lower()
+    mode = (getattr(row, "chasing_delivery_mode", None) or "email").lower()
     if mode not in ("email", "sms", "both"):
         mode = "email"
     return enabled, mode
@@ -906,11 +916,13 @@ class ChasingGlobalsOut(BaseModel):
     enabled: bool
     hour: int                           # 0..23
     default_sequence_id: Optional[int] = None
+    delivery_mode: str = "email"
 
 class ChasingGlobalsIn(BaseModel):
     enabled: bool
     hour: int                           # 0..23
     default_sequence_id: Optional[int] = None
+    delivery_mode: Optional[str] = None
 
 def _ensure_chasing_global_rule(db: Session, user_id: int) -> None:
     """
@@ -1016,10 +1028,15 @@ def get_chasing_globals(db: Session = Depends(get_db), user=Depends(require_user
         hh = int(_norm_time(row["reminder_time"]).split(":")[0])
     except Exception:
         hh = 9
+    sms_settings = _ensure_sms_settings(db, user.id)
+    delivery_mode = (sms_settings.chasing_delivery_mode or "email").lower()
+    if delivery_mode not in ("email", "sms", "both"):
+        delivery_mode = "email"
     return ChasingGlobalsOut(
         enabled = bool(row["reminder_enabled"]),
         hour = hh,
         default_sequence_id = row.get("reminder_sequence_id"),
+        delivery_mode = delivery_mode,
     )
 
 @router.post("/globals")
@@ -1034,6 +1051,14 @@ def save_chasing_globals(
         hour=int(body.hour),
         default_sequence_id=body.default_sequence_id if body.default_sequence_id is not None else None,
     )
+    if body.delivery_mode is not None:
+        mode = body.delivery_mode.lower().strip()
+        if mode not in ("email", "sms", "both"):
+            raise HTTPException(400, "delivery_mode must be email, sms, or both")
+        sms_settings = _ensure_sms_settings(db, user.id)
+        sms_settings.chasing_delivery_mode = mode
+        db.add(sms_settings)
+        db.commit()
     return {"ok": True}
 
 # ----- Chasing global exclusions (frequency='chasing') -----

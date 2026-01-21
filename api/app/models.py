@@ -48,10 +48,8 @@ class AccountSmsSettings(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
 
     enabled = Column(Boolean, nullable=False, default=False)
-    delivery_mode = Column(String(10), nullable=False, default="email")  # email|sms|both
+    chasing_delivery_mode = Column(String(10), nullable=False, default="email")  # email|sms|both
 
-    twilio_account_sid_enc = Column(Text, nullable=True)
-    twilio_auth_token_enc = Column(Text, nullable=True)
     twilio_phone_number = Column(String(30), nullable=True)
     twilio_phone_sid = Column(String(64), nullable=True)
 
