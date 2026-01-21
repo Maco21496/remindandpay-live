@@ -1,19 +1,15 @@
 // HTML invoice import settings
 (function () {
   const nameInput = document.getElementById('html_template_name');
-  const selectEl = document.getElementById('html_template_selector');
-  const bodyInput = document.getElementById('html_invoice_body');
+  const templateList = document.getElementById('html_template_list');
   const createBtn = document.getElementById('html_template_create');
-  const saveBtn = document.getElementById('html_invoice_save');
-  const editBtn = document.getElementById('html_invoice_edit');
   const msgEl = document.getElementById('html_invoice_msg');
   const previewEl = document.getElementById('html_preview');
   const subjectInput = document.getElementById('html_subject_token');
   const subjectCopyBtn = document.getElementById('html_subject_copy');
   const subjectRefreshBtn = document.getElementById('html_subject_refresh');
-  const sampleModeEmail = document.getElementById('html_sample_mode_email');
-  const sampleModePaste = document.getElementById('html_sample_mode_paste');
-  const sampleEditor = document.getElementById('html_sample_editor');
+  const importAddressInput = document.getElementById('html_import_address');
+  const importCopyBtn = document.getElementById('html_import_copy');
   const mapperSaveBtn = document.getElementById('html_mapper_save');
   const mapperMsg = document.getElementById('html_mapper_msg');
   const filterSelect = document.getElementById('html_filter_select');
@@ -29,7 +25,6 @@
   const step1Panel = document.getElementById('html_step1_panel');
   const step1Hint = document.getElementById('html_step1_hint');
   let activeTemplateName = '';
-  let sampleMode = 'email';
   let lastEmailHtml = '';
   let templateJson = { fields: {} };
   let activeFieldKey = '';
@@ -38,7 +33,6 @@
 
   function setActiveTemplate(name) {
     activeTemplateName = (name || '').trim();
-    if (saveBtn) saveBtn.disabled = !activeTemplateName;
   }
 
   function setPreview(html) {
@@ -54,34 +48,6 @@
     subjectInput.value = token || '';
   }
 
-  function collapseEditor(collapsed) {
-    if (!bodyInput || !saveBtn || !editBtn || sampleMode !== 'paste') return;
-    if (collapsed) {
-      bodyInput.style.display = 'none';
-      saveBtn.style.display = 'none';
-      editBtn.style.display = 'inline-flex';
-    } else {
-      bodyInput.style.display = '';
-      saveBtn.style.display = '';
-      editBtn.style.display = 'none';
-    }
-  }
-
-  function updateSampleMode(mode) {
-    sampleMode = mode === 'paste' ? 'paste' : 'email';
-    if (sampleMode === 'paste') {
-      if (sampleEditor) sampleEditor.style.display = '';
-      if (saveBtn) saveBtn.style.display = '';
-      collapseEditor(!!(bodyInput?.value || '').trim());
-      setPreview(bodyInput?.value || '');
-    } else {
-      if (sampleEditor) sampleEditor.style.display = 'none';
-      if (saveBtn) saveBtn.style.display = 'none';
-      if (editBtn) editBtn.style.display = 'none';
-      setPreview(lastEmailHtml || '');
-    }
-    attachPreviewClickHandler();
-  }
 
   function setTemplateJson(data) {
     if (data && typeof data === 'object') {
@@ -308,33 +274,45 @@
     if (mapperMsg) mapperMsg.textContent = `Captured ${activeFieldKey.replace('_', ' ')}.`;
   }
 
+  function renderTemplateList(list, selectedName) {
+    if (!templateList) return;
+    templateList.innerHTML = '';
+    if (!list.length) {
+      templateList.innerHTML = '<div class="muted" style="font-size:12px;">No templates yet.</div>';
+      return;
+    }
+    for (const item of list) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = item.template_name;
+      btn.className = 'btn btn--subtle';
+      btn.style.width = '100%';
+      btn.style.justifyContent = 'flex-start';
+      btn.style.marginBottom = '6px';
+      if (item.template_name === selectedName) {
+        btn.style.background = '#eef2ff';
+      }
+      btn.addEventListener('click', () => loadTemplate(item.template_name));
+      templateList.appendChild(btn);
+    }
+  }
+
   async function loadTemplates(selectedName) {
-    if (!selectEl) return;
-    selectEl.innerHTML = '<option value="">(choose template)</option>';
     try {
       const res = await fetch('/api/inbound/html/templates', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       const list = Array.isArray(data.templates) ? data.templates : [];
-      for (const item of list) {
-        const opt = document.createElement('option');
-        opt.value = item.template_name;
-        opt.textContent = item.template_name;
-        selectEl.appendChild(opt);
-      }
-      if (selectedName) {
-        selectEl.value = selectedName;
-      }
-      const chosen = selectEl.value || (list[0]?.template_name || '');
+      const chosen = selectedName || list[0]?.template_name || '';
+      renderTemplateList(list, chosen);
       if (chosen) {
-        selectEl.value = chosen;
         await loadTemplate(chosen);
       } else {
         setSubjectToken('');
         lastEmailHtml = '';
         setTemplateJson({ fields: {} });
         clearFieldBadges();
-        updateSampleMode(sampleMode);
+        setPreview('');
       }
     } catch (err) {
       console.error('Failed to load HTML templates', err);
@@ -348,7 +326,6 @@
       if (!res.ok) return;
       const data = await res.json();
       if (nameInput) nameInput.value = data.template_name || name;
-      if (bodyInput) bodyInput.value = data.html_body || '';
       setSubjectToken(data.subject_token || '');
       setActiveTemplate(data.template_name || name);
       lastEmailHtml = data.html_email_body || '';
@@ -362,7 +339,7 @@
         const filteredValue = applyFilter(rawValue, spec?.filter);
         updateFieldBadge(fieldKey, filteredValue || rawValue || '');
       });
-      updateSampleMode(sampleMode);
+      setPreview(lastEmailHtml || '');
       previewEl?.addEventListener('load', () => {
         clearFieldBadges();
         Object.keys(templateJson.fields || {}).forEach((fieldKey) => {
@@ -388,10 +365,9 @@
       msgEl.textContent = 'Enter a template name.';
       return;
     }
-    const body = bodyInput?.value || '';
     const payload = new FormData();
     payload.append('template_name', templateName);
-    payload.append('html_body', body);
+    payload.append('html_body', '');
     payload.append('template_json', JSON.stringify(templateJson || { fields: {} }));
     try {
       const res = await fetch('/api/inbound/html/save-template', { method: 'POST', body: payload });
@@ -404,7 +380,7 @@
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      updateSampleMode(sampleMode);
+      setPreview(lastEmailHtml || '');
     } catch (err) {
       msgEl.textContent = 'Save failed.';
       console.error('Failed to save HTML template', err);
@@ -421,7 +397,7 @@
     }
     const payload = new FormData();
     payload.append('template_name', templateName);
-    payload.append('html_body', bodyInput?.value || '');
+    payload.append('html_body', '');
     payload.append('template_json', JSON.stringify(templateJson || { fields: {} }));
     try {
       const res = await fetch('/api/inbound/html/save-template', { method: 'POST', body: payload });
@@ -434,23 +410,22 @@
       setActiveTemplate(templateName);
       await loadTemplates(templateName);
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      updateSampleMode(sampleMode);
+      setPreview(lastEmailHtml || '');
     } catch (err) {
       msgEl.textContent = 'Create failed.';
       console.error('Failed to create HTML template', err);
     }
   }
 
-  selectEl?.addEventListener('change', (e) => {
-    const value = e.target.value;
-    if (value) loadTemplate(value);
-  });
   createBtn?.addEventListener('click', createTemplate);
-  saveBtn?.addEventListener('click', saveTemplate);
-  editBtn?.addEventListener('click', () => collapseEditor(false));
   subjectCopyBtn?.addEventListener('click', () => {
     if (!subjectInput || !subjectInput.value) return;
     subjectInput.select();
+    document.execCommand('copy');
+  });
+  importCopyBtn?.addEventListener('click', () => {
+    if (!importAddressInput || !importAddressInput.value) return;
+    importAddressInput.select();
     document.execCommand('copy');
   });
   previewEl?.addEventListener('load', () => {
@@ -597,12 +572,6 @@
       console.error('Failed to save mapping', err);
     }
   });
-  sampleModeEmail?.addEventListener('change', () => {
-    if (sampleModeEmail.checked) updateSampleMode('email');
-  });
-  sampleModePaste?.addEventListener('change', () => {
-    if (sampleModePaste.checked) updateSampleMode('paste');
-  });
   subjectRefreshBtn?.addEventListener('click', async () => {
     if (!activeTemplateName) return;
     if (msgEl) msgEl.textContent = 'Refreshing preview…';
@@ -615,7 +584,7 @@
       const data = await res.json();
       lastEmailHtml = data.html_body || '';
       setSubjectToken(data.subject_token || subjectInput?.value || '');
-      updateSampleMode(sampleMode);
+      setPreview(lastEmailHtml || '');
       if (msgEl) msgEl.textContent = 'Preview updated.';
     } catch (err) {
       if (msgEl) msgEl.textContent = 'Preview refresh failed.';
@@ -625,6 +594,18 @@
   setActiveTemplate('');
   setPreview('');
   setSubjectToken('');
-  updateSampleMode('email');
+  async function loadImportAddress() {
+    if (!importAddressInput) return;
+    try {
+      const res = await fetch('/api/inbound/settings', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      importAddressInput.value = data.inbound_address || '';
+    } catch (err) {
+      console.error('Failed to load inbound settings', err);
+    }
+  }
+
+  loadImportAddress();
   loadTemplates();
 })();

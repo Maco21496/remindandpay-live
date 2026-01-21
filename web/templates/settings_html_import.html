@@ -45,14 +45,11 @@
           Create template
         </button>
 
-        <div class="field">
-          <label for="html_template_selector" style="display:block; font-weight:500; font-size:13px; margin-bottom:4px;">
-            Saved templates
-          </label>
-          <select id="html_template_selector" style="height:32px; padding:0 8px; width:100%;">
-            <option value="">(choose template)</option>
-          </select>
-          <div class="muted" style="font-size:12px; margin-top:4px;">Select a template to load its saved HTML sample.</div>
+        <div class="field" style="margin-bottom:12px;">
+          <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Saved templates</div>
+          <div id="html_template_list" class="subpanel" style="padding:6px;">
+            <div class="muted" style="font-size:12px;">No templates yet.</div>
+          </div>
         </div>
 
         <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
@@ -72,32 +69,14 @@
         </div>
 
         <div style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
-          <div style="font-weight:600; margin-bottom:6px;">HTML sample source</div>
-          <div class="muted" style="font-size:12px; margin-bottom:8px;">
-            Choose how you want to load the HTML preview. The default option is to forward a test email.
+          <div style="font-weight:600; margin-bottom:6px;">Import email address</div>
+          <div class="field-row" style="gap:8px; align-items:center;">
+            <input id="html_import_address" readonly style="height:32px; padding:0 8px; flex:1;">
+            <button id="html_import_copy" class="btn btn--subtle" type="button">Copy</button>
           </div>
-          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:6px;">
-            <input type="radio" name="html_sample_mode" id="html_sample_mode_email" value="email" checked>
-            <span class="muted" style="font-size:12px;">Use forwarded test email (recommended).</span>
-          </label>
-          <label class="field-row" style="gap:8px; align-items:center; margin-bottom:8px;">
-            <input type="radio" name="html_sample_mode" id="html_sample_mode_paste" value="paste">
-            <span class="muted" style="font-size:12px;">Paste raw HTML (advanced).</span>
-          </label>
-
-          <div id="html_sample_editor" style="margin-top:8px;">
-            <div class="muted" style="font-size:12px; margin-bottom:6px;">Paste the HTML email body and save it to the template.</div>
-            <textarea
-              id="html_invoice_body"
-              rows="10"
-              placeholder="Paste HTML email body here..."
-              style="width:100%; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height:180px;"
-            ></textarea>
-            <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
-              <button id="html_invoice_save" class="btn" type="button" disabled>Save HTML sample</button>
-              <button id="html_invoice_edit" class="btn btn--subtle" type="button" style="display:none;">Edit HTML sample</button>
-              <span id="html_invoice_msg" class="muted" style="font-size:12px;"></span>
-            </div>
+          <div class="muted" style="font-size:12px; margin-top:8px;">
+            Default option: forward an example invoice email to your import address with this subject line. If your mail client won’t
+            keep the subject, paste this token on the first line of the email body instead.
           </div>
         </div>
       </div>
