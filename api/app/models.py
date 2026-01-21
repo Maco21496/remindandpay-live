@@ -41,6 +41,32 @@ class AppSettings(Base):
 
     user = relationship("User")
 
+class AccountSmsSettings(Base):
+    __tablename__ = "account_sms_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+
+    enabled = Column(Boolean, nullable=False, default=False)
+    delivery_mode = Column(String(10), nullable=False, default="email")  # email|sms|both
+
+    twilio_account_sid_enc = Column(Text, nullable=True)
+    twilio_auth_token_enc = Column(Text, nullable=True)
+    twilio_phone_number = Column(String(30), nullable=True)
+    twilio_phone_sid = Column(String(64), nullable=True)
+
+    forwarding_enabled = Column(Boolean, nullable=False, default=False)
+    forward_to_phone = Column(String(30), nullable=True)
+
+    bundle_size = Column(Integer, nullable=False, default=1000)
+    credits_balance = Column(Integer, nullable=False, default=0)
+    free_credits = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
 class Customer(Base):
     __tablename__ = "customers"
 

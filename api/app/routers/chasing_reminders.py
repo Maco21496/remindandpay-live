@@ -19,6 +19,7 @@ from ..models import (
     ChasingPlan,       # was ReminderSequence
     ChasingTrigger,    # was ReminderStep
     ReminderTemplate,
+    AccountSmsSettings,
     Customer,
     Invoice,
     EmailOutbox,
@@ -66,6 +67,7 @@ class SendNowIn(BaseModel):
     customer_ids: Optional[List[int]] = None      # optional subset of customers
     limit: Optional[int] = Field(default=None, ge=1)
     ignore_dedupe_hours: Optional[int] = Field(default=None, ge=0)
+    delivery_mode: Optional[str] = Field(default=None, description="email|sms|both")
 
 class SendNowOut(BaseModel):
     ok: bool
@@ -144,10 +146,10 @@ def _oldest_overdue_invoice_id(db: Session, user_id: int, customer_id: int) -> O
     """)
     return db.execute(sql, {"uid": user_id, "cid": customer_id}).scalar()
 
-# all eligible chasing targets = has email + not excluded in reminder_global_exclusions for 'chasing'
+# all eligible chasing targets = not excluded in reminder_global_exclusions for 'chasing'
 def _eligible_customers(db: Session, user_id: int) -> list[Dict]:
     sql = sqltext("""
-        SELECT c.id, c.name, c.email, c.reminder_sequence_id
+        SELECT c.id, c.name, c.email, c.phone, c.reminder_sequence_id
           FROM customers c
      LEFT JOIN reminder_global_exclusions e
             ON e.user_id = :uid
@@ -155,12 +157,16 @@ def _eligible_customers(db: Session, user_id: int) -> list[Dict]:
            AND e.customer_id = c.id
          WHERE c.user_id = :uid
            AND e.customer_id IS NULL
-           AND c.email IS NOT NULL
-           AND TRIM(c.email) <> ''
     """)
     rows = db.execute(sql, {"uid": user_id}).fetchall()
     return [
-        {"id": r.id, "name": r.name, "email": r.email, "seq_id": r.reminder_sequence_id}
+        {
+            "id": r.id,
+            "name": r.name,
+            "email": r.email,
+            "phone": r.phone,
+            "seq_id": r.reminder_sequence_id,
+        }
         for r in rows
     ]
 
@@ -185,15 +191,24 @@ def _oldest_days_overdue(db: Session, user_id: int, customer_id: int) -> int:
     v = db.execute(sql, {"uid": user_id, "cid": customer_id}).scalar()
     return int(v or 0)
 
-def _choose_step(db: Session, seq_id: int, days_overdue: int) -> Optional[ChasingTrigger]:
+def _choose_step(
+    db: Session,
+    seq_id: int,
+    days_overdue: int,
+    channel: Optional[str] = None,
+) -> Optional[ChasingTrigger]:
     # pick the most "aggressive" trigger whose offset_days <= how overdue they are
-    return (
+    query = (
         db.query(ChasingTrigger)
           .filter(ChasingTrigger.sequence_id == seq_id)
           .filter(ChasingTrigger.offset_days <= days_overdue)
-          .order_by(ChasingTrigger.offset_days.desc(), ChasingTrigger.id.asc())
-          .first()
     )
+    if channel:
+        query = query.filter(ChasingTrigger.channel == channel)
+    return query.order_by(
+        ChasingTrigger.offset_days.desc(),
+        ChasingTrigger.id.asc(),
+    ).first()
 
 def _load_template(db: Session, user_id: int, key: str, channel: str = "email") -> Optional[ReminderTemplate]:
     return (
@@ -208,18 +223,50 @@ def _load_template(db: Session, user_id: int, key: str, channel: str = "email") 
     )
 
 # simple dedupe: don’t enqueue same (customer, template_key) recently
-def _sent_recently(db: Session, user_id: int, customer_id: int, template_key: str) -> bool:
+def _sent_recently(
+    db: Session,
+    user_id: int,
+    customer_id: int,
+    template_key: str,
+    channel: Optional[str] = None,
+) -> bool:
     since = datetime.utcnow() - timedelta(hours=1)
-    cnt = (
+    query = (
         db.query(EmailOutbox.id)
           .filter(
               EmailOutbox.user_id == user_id,
               EmailOutbox.customer_id == customer_id,
               EmailOutbox.template == template_key,
               EmailOutbox.created_at >= since,
-          ).count()
+          )
     )
+    if channel:
+        query = query.filter(EmailOutbox.channel == channel)
+    cnt = query.count()
     return cnt > 0
+
+def _get_sms_settings(db: Session, user_id: int) -> tuple[bool, str]:
+    row = (
+        db.query(AccountSmsSettings)
+          .filter(AccountSmsSettings.user_id == user_id)
+          .first()
+    )
+    enabled = bool(getattr(row, "enabled", False))
+    mode = (getattr(row, "delivery_mode", None) or "email").lower()
+    if mode not in ("email", "sms", "both"):
+        mode = "email"
+    return enabled, mode
+
+def _allowed_channels(delivery_mode: str, sms_enabled: bool) -> list[str]:
+    if delivery_mode == "both":
+        channels = ["email", "sms"]
+    elif delivery_mode == "sms":
+        channels = ["sms"]
+    else:
+        channels = ["email"]
+    if not sms_enabled and "sms" in channels:
+        channels = [c for c in channels if c != "sms"]
+    return channels
 
 def _customer_overdue_summary(db: Session, user_id: int, customer_id: int) -> dict:
     cust = (
@@ -487,19 +534,22 @@ def send_now(
     if body.limit:
         pool = pool[: int(body.limit)]
 
-    def _sent_recently_override(db_, user_id_, customer_id_, template_key_):
+    def _sent_recently_override(db_, user_id_, customer_id_, template_key_, channel_):
         if body.ignore_dedupe_hours is None:
-            return _sent_recently(db_, user_id_, customer_id_, template_key_)
+            return _sent_recently(db_, user_id_, customer_id_, template_key_, channel_)
         since = datetime.utcnow() - timedelta(hours=body.ignore_dedupe_hours)
-        cnt = (
+        query = (
             db_.query(EmailOutbox.id)
                .filter(
                    EmailOutbox.user_id == user_id_,
                    EmailOutbox.customer_id == customer_id_,
                    EmailOutbox.template == template_key_,
                    EmailOutbox.created_at >= since,
-               ).count()
+               )
         )
+        if channel_:
+            query = query.filter(EmailOutbox.channel == channel_)
+        cnt = query.count()
         return cnt > 0
 
     # default chasing rule (non-global row, is_global=0)
@@ -513,18 +563,18 @@ def send_now(
           .first()
     )
 
+    sms_enabled, default_mode = _get_sms_settings(db, user.id)
+    delivery_mode = (body.delivery_mode or default_mode or "email").lower()
+    channels = _allowed_channels(delivery_mode, sms_enabled)
+
     jobs = 0
+    if not channels:
+        return SendNowOut(ok=True, jobs=jobs, targeted_customers=len(pool))
 
     for c in pool:
         sp = db.begin_nested()  # savepoint per customer
         try:
-            to_email = (c.get("email") or "").strip()
-            if not to_email:
-                sp.rollback()
-                continue
-            if len(to_email) > 254:
-                to_email = to_email[:254]
-
+            enqueued = 0
             # pick which plan to use:
             # manual override -> customer override -> default on rule
             seq_id = body.sequence_id or c.get("seq_id") or (rule.reminder_sequence_id if rule else None)
@@ -536,101 +586,111 @@ def send_now(
             if days <= 0:
                 sp.rollback()
                 continue
+            for channel in channels:
+                if channel == "email":
+                    to_email = (c.get("email") or "").strip()
+                    if not to_email:
+                        continue
+                    if len(to_email) > 254:
+                        to_email = to_email[:254]
+                else:
+                    to_email = (c.get("phone") or "").strip()
+                    if not to_email:
+                        continue
 
-            trigger = _choose_step(db, seq_id, days)
-            if not trigger or trigger.channel != "email":
-                sp.rollback()
-                continue
+                trigger = _choose_step(db, seq_id, days, channel=channel)
+                if not trigger:
+                    continue
 
-            tpl = _load_template(db, user.id, trigger.template_key, trigger.channel)
-            if not tpl:
-                sp.rollback()
-                continue
+                tpl = _load_template(db, user.id, trigger.template_key, trigger.channel)
+                if not tpl:
+                    continue
 
-            if _sent_recently_override(db, user.id, c["id"], trigger.template_key):
-                sp.rollback()
-                continue
+                if _sent_recently_override(db, user.id, c["id"], trigger.template_key, channel):
+                    continue
 
-            subj_raw = (tpl.subject or "").strip()
-            if len(subj_raw) > 255:
-                subj_raw = subj_raw[:255]
+                subj_raw = (tpl.subject or "").strip()
+                if len(subj_raw) > 255:
+                    subj_raw = subj_raw[:255]
 
-            template_key = (trigger.template_key or "").strip()
-            if len(template_key) > 64:
-                template_key = template_key[:64]
+                template_key = (trigger.template_key or "").strip()
+                if len(template_key) > 64:
+                    template_key = template_key[:64]
 
-            summary = _customer_overdue_summary(db, user.id, c["id"])
-            ctx = {
-                "customer_name": summary["customer_name"],
-                "invoice_count": summary["invoice_count"],
-                "overdue_total": summary["overdue_total"],
-                "oldest_days_overdue": summary["oldest_days_overdue"],
-                "oldest_invoice": summary["oldest_invoice"],
-                "pay_url": summary["pay_url"],
-                "invoices_table": _invoices_table_html(summary["invoices"]),
-            }
-
-            body_html_raw = (tpl.body_html or "").strip()
-            body_text_raw = (tpl.body_text or "").strip()
-
-            subj      = _render_tokens(subj_raw,      ctx)
-            body_html = _render_tokens(body_html_raw, ctx)
-            body_text = _render_tokens(body_text_raw, ctx)
-            body      = body_html or body_text
-            if not body:
-                sp.rollback()
-                continue
-
-            payload = {
-                "sequence_id": seq_id,
-                "step_id": trigger.id,
-                "days_overdue": days,
-                "summary": {
+                summary = _customer_overdue_summary(db, user.id, c["id"])
+                ctx = {
+                    "customer_name": summary["customer_name"],
                     "invoice_count": summary["invoice_count"],
                     "overdue_total": summary["overdue_total"],
                     "oldest_days_overdue": summary["oldest_days_overdue"],
-                },
-            }
+                    "oldest_invoice": summary["oldest_invoice"],
+                    "pay_url": summary["pay_url"],
+                    "invoices_table": _invoices_table_html(summary["invoices"]),
+                }
 
-            outbox_row = EmailOutbox(
-                user_id=user.id,
-                customer_id=c["id"],
-                channel="email",
-                template=template_key,
-                to_email=to_email,
-                subject=subj,
-                body=body,
-                payload_json=json.dumps(payload),
-                rule_id=rule.id if rule else None,
-                run_id=None,
-                status="queued",
-                next_attempt_at=now,
-            )
-            db.add(outbox_row)
-            db.flush()
+                body_html_raw = (tpl.body_html or "").strip()
+                body_text_raw = (tpl.body_text or "").strip()
 
-            try:
-                inv_id = _oldest_overdue_invoice_id(db, user.id, c["id"])
-                if inv_id:
-                    evt = ReminderEvent(
-                        invoice_id=inv_id,
-                        channel="email",
-                        template=template_key,
-                        sent_at=now,
-                        meta=json.dumps({
-                            "customer_id": c["id"],
-                            "days_overdue": days,
-                            "sequence_id": seq_id,
-                            "step_id": trigger.id,
-                        }),
-                    )
-                    db.add(evt)
-                    db.flush()
-            except Exception as e_evt:
-                print("ERROR ReminderEvent for customer", c["id"], ":", repr(e_evt))
+                subj      = _render_tokens(subj_raw,      ctx)
+                body_html = _render_tokens(body_html_raw, ctx)
+                body_text = _render_tokens(body_text_raw, ctx)
+                body      = body_text if channel == "sms" else (body_html or body_text)
+                if not body:
+                    continue
+
+                payload = {
+                    "sequence_id": seq_id,
+                    "step_id": trigger.id,
+                    "days_overdue": days,
+                    "channel": channel,
+                    "summary": {
+                        "invoice_count": summary["invoice_count"],
+                        "overdue_total": summary["overdue_total"],
+                        "oldest_days_overdue": summary["oldest_days_overdue"],
+                    },
+                }
+
+                outbox_row = EmailOutbox(
+                    user_id=user.id,
+                    customer_id=c["id"],
+                    channel=channel,
+                    template=template_key,
+                    to_email=to_email,
+                    subject=subj if channel == "email" else "SMS",
+                    body=body,
+                    payload_json=json.dumps(payload),
+                    rule_id=rule.id if rule else None,
+                    run_id=None,
+                    status="queued",
+                    next_attempt_at=now,
+                )
+                db.add(outbox_row)
+                db.flush()
+                enqueued += 1
+
+                try:
+                    inv_id = _oldest_overdue_invoice_id(db, user.id, c["id"])
+                    if inv_id:
+                        evt = ReminderEvent(
+                            invoice_id=inv_id,
+                            channel=channel,
+                            template=template_key,
+                            sent_at=now,
+                            meta=json.dumps({
+                                "customer_id": c["id"],
+                                "days_overdue": days,
+                                "sequence_id": seq_id,
+                                "step_id": trigger.id,
+                                "channel": channel,
+                            }),
+                        )
+                        db.add(evt)
+                        db.flush()
+                except Exception as e_evt:
+                    print("ERROR ReminderEvent for customer", c["id"], ":", repr(e_evt))
 
             sp.commit()
-            jobs += 1
+            jobs += enqueued
 
         except Exception as e_main:
             print("ERROR SendNow enqueue for customer", c["id"], ":", repr(e_main))
@@ -700,16 +760,12 @@ def enqueue_due(db: Session = Depends(get_db)):
         for r in rules:
             user_id = r.user_id
             customers = _eligible_customers(db, user_id)
+            sms_enabled, default_mode = _get_sms_settings(db, user_id)
+            channels = _allowed_channels(default_mode, sms_enabled)
 
             jobs = 0
             for c in customers:
                 try:
-                    to_email = (c.get("email") or "").strip()
-                    if not to_email:
-                        continue
-                    if len(to_email) > 254:
-                        to_email = to_email[:254]
-
                     # sequence: customer override -> rule default
                     seq_id = c["seq_id"] or r.reminder_sequence_id
                     if not seq_id:
@@ -719,91 +775,105 @@ def enqueue_due(db: Session = Depends(get_db)):
                     if days <= 0:
                         continue
 
-                    trigger = _choose_step(db, seq_id, days)
-                    if not trigger or trigger.channel != "email":
-                        continue
+                    for channel in channels:
+                        if channel == "email":
+                            to_email = (c.get("email") or "").strip()
+                            if not to_email:
+                                continue
+                            if len(to_email) > 254:
+                                to_email = to_email[:254]
+                        else:
+                            to_email = (c.get("phone") or "").strip()
+                            if not to_email:
+                                continue
 
-                    tpl = _load_template(db, user_id, trigger.template_key, trigger.channel)
-                    if not tpl:
-                        continue
+                        trigger = _choose_step(db, seq_id, days, channel=channel)
+                        if not trigger:
+                            continue
 
-                    if _sent_recently(db, user_id, c["id"], trigger.template_key):
-                        continue
+                        tpl = _load_template(db, user_id, trigger.template_key, trigger.channel)
+                        if not tpl:
+                            continue
 
-                    subj_raw = (tpl.subject or "").strip()
-                    if len(subj_raw) > 255:
-                        subj_raw = subj_raw[:255]
+                        if _sent_recently(db, user_id, c["id"], trigger.template_key, channel):
+                            continue
 
-                    template_key = (trigger.template_key or "").strip()
-                    if len(template_key) > 64:
-                        template_key = template_key[:64]
+                        subj_raw = (tpl.subject or "").strip()
+                        if len(subj_raw) > 255:
+                            subj_raw = subj_raw[:255]
 
-                    summary = _customer_overdue_summary(db, user_id, c["id"])
-                    ctx = {
-                        "customer_name": summary["customer_name"],
-                        "invoice_count": summary["invoice_count"],
-                        "overdue_total": summary["overdue_total"],
-                        "oldest_days_overdue": summary["oldest_days_overdue"],
-                        "oldest_invoice": summary["oldest_invoice"],
-                        "pay_url": summary["pay_url"],
-                        "invoices_table": _invoices_table_html(summary["invoices"]),
-                    }
+                        template_key = (trigger.template_key or "").strip()
+                        if len(template_key) > 64:
+                            template_key = template_key[:64]
 
-                    body_html_raw = (tpl.body_html or "").strip()
-                    body_text_raw = (tpl.body_text or "").strip()
-
-                    subj      = _render_tokens(subj_raw,      ctx)
-                    body_html = _render_tokens(body_html_raw, ctx)
-                    body_text = _render_tokens(body_text_raw, ctx)
-                    body      = body_html or body_text
-                    if not body:
-                        continue
-
-                    payload = {
-                        "sequence_id": seq_id,
-                        "step_id": trigger.id,
-                        "days_overdue": days,
-                        "summary": {
+                        summary = _customer_overdue_summary(db, user_id, c["id"])
+                        ctx = {
+                            "customer_name": summary["customer_name"],
                             "invoice_count": summary["invoice_count"],
                             "overdue_total": summary["overdue_total"],
                             "oldest_days_overdue": summary["oldest_days_overdue"],
+                            "oldest_invoice": summary["oldest_invoice"],
+                            "pay_url": summary["pay_url"],
+                            "invoices_table": _invoices_table_html(summary["invoices"]),
                         }
-                    }
 
-                    job = EmailOutbox(
-                        user_id=user_id,
-                        customer_id=c["id"],
-                        channel="email",
-                        template=template_key,
-                        to_email=to_email,
-                        subject=subj,
-                        body=body,
-                        payload_json=json.dumps(payload),
-                        rule_id=r.id,
-                        run_id=None,
-                        status="queued",
-                        next_attempt_at=now,
-                    )
-                    db.add(job)
-                    db.flush()
+                        body_html_raw = (tpl.body_html or "").strip()
+                        body_text_raw = (tpl.body_text or "").strip()
 
-                    inv_id = _oldest_overdue_invoice_id(db, user_id, c["id"])
-                    if inv_id:
-                        db.add(ReminderEvent(
-                            invoice_id=inv_id,
-                            channel="email",
+                        subj      = _render_tokens(subj_raw,      ctx)
+                        body_html = _render_tokens(body_html_raw, ctx)
+                        body_text = _render_tokens(body_text_raw, ctx)
+                        body      = body_text if channel == "sms" else (body_html or body_text)
+                        if not body:
+                            continue
+
+                        payload = {
+                            "sequence_id": seq_id,
+                            "step_id": trigger.id,
+                            "days_overdue": days,
+                            "channel": channel,
+                            "summary": {
+                                "invoice_count": summary["invoice_count"],
+                                "overdue_total": summary["overdue_total"],
+                                "oldest_days_overdue": summary["oldest_days_overdue"],
+                            }
+                        }
+
+                        job = EmailOutbox(
+                            user_id=user_id,
+                            customer_id=c["id"],
+                            channel=channel,
                             template=template_key,
-                            sent_at=now,
-                            meta=json.dumps({
-                                "customer_id": c["id"],
-                                "days_overdue": days,
-                                "sequence_id": seq_id,
-                                "step_id": trigger.id
-                            })
-                        ))
+                            to_email=to_email,
+                            subject=subj if channel == "email" else "SMS",
+                            body=body,
+                            payload_json=json.dumps(payload),
+                            rule_id=r.id,
+                            run_id=None,
+                            status="queued",
+                            next_attempt_at=now,
+                        )
+                        db.add(job)
                         db.flush()
 
-                    jobs += 1
+                        inv_id = _oldest_overdue_invoice_id(db, user_id, c["id"])
+                        if inv_id:
+                            db.add(ReminderEvent(
+                                invoice_id=inv_id,
+                                channel=channel,
+                                template=template_key,
+                                sent_at=now,
+                                meta=json.dumps({
+                                    "customer_id": c["id"],
+                                    "days_overdue": days,
+                                    "sequence_id": seq_id,
+                                    "step_id": trigger.id,
+                                    "channel": channel,
+                                })
+                            ))
+                            db.flush()
+
+                        jobs += 1
 
                 except Exception:
                     db.rollback()
