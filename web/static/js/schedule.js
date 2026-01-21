@@ -735,6 +735,7 @@ document.addEventListener("click", (e) => {
   const chEnabled     = q("#ch_enabled");
   const chHour        = q("#ch_hour");
   const chSeqDefault  = q("#ch_sequence_default");
+  const chDelivery    = q("#ch_delivery_mode");
   const chSaveBtn     = q("#ch_save");
   const chExclBtn     = q("#ch_excl_btn");
 
@@ -742,6 +743,7 @@ document.addEventListener("click", (e) => {
   const chSNSeq   = q("#ch_sendnow_sequence");
   const chSNPick  = q("#ch_sendnow_customers");
   const chSNSum   = q("#ch_sendnow_summary");
+  const chSNMode  = q("#ch_sendnow_delivery");
   const chSNBtn   = q("#ch_sendnow_btn");
   const chSNRes   = q("#ch_sendnow_result");
 
@@ -1131,6 +1133,7 @@ document.addEventListener("click", (e) => {
 
       setSelectValue(chEnabled, enabled ? "true" : "false");
       setSelectValue(chHour, hourOpt);
+      if (chDelivery) chDelivery.disabled = !enabled;
 
       const want = data.default_sequence_id;
       const has = seqs.some((s) => String(s.id) === String(want));
@@ -1138,8 +1141,23 @@ document.addEventListener("click", (e) => {
       if (chSeqDefault) chSeqDefault.disabled = !enabled;
 
       await updateChasingExclSummary();
+      await loadChasingDeliveryMode();
     } catch (e) {
       console.error("loadChasingGlobals failed", e);
+    }
+  }
+
+  async function loadChasingDeliveryMode() {
+    if (!chDelivery && !chSNMode) return;
+    try {
+      const r = await fetch("/api/sms/settings", { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      const mode = data.delivery_mode || "email";
+      if (chDelivery) setSelectValue(chDelivery, mode);
+      if (chSNMode) setSelectValue(chSNMode, mode);
+    } catch (e) {
+      console.error("loadChasingDeliveryMode failed", e);
     }
   }
 
@@ -1158,6 +1176,14 @@ document.addEventListener("click", (e) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+
+      if (chDelivery) {
+        await safeFetch("/api/sms/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ delivery_mode: chDelivery.value }),
+        });
+      }
 
       flashSaved(chSaveBtn, true, "Saved ✓");
     } catch (e) {
@@ -1327,6 +1353,7 @@ document.addEventListener("click", (e) => {
         chSNSelected && chSNSelected.size > 0
           ? Array.from(chSNSelected)
           : null,
+      delivery_mode: chSNMode?.value || chDelivery?.value || "email",
     };
 
     const prettyCycle = seqRaw ? `cycle #${seqRaw}` : "default cycles";
@@ -1349,14 +1376,21 @@ document.addEventListener("click", (e) => {
       });
       const j = await r.json().catch(() => ({}));
       if (chSNRes)
-        chSNRes.textContent = `Queued ${j.jobs ?? 0} email(s).`;
+        chSNRes.textContent = `Queued ${j.jobs ?? 0} message(s).`;
 
-      // jump you to activity tab + refresh
+      const targetTabName =
+        body.delivery_mode === "sms" ? "sms-activity" : "activity";
       const activityTab = qa(".tab").find(
-        (t) => (t.dataset.tab || "") === "activity"
+        (t) => (t.dataset.tab || "") === targetTabName
       );
       if (activityTab) activityTab.click();
-      setTimeout(() => loadOutbox && loadOutbox(), 200);
+      setTimeout(() => {
+        if (targetTabName === "sms-activity") {
+          loadSmsOutbox && loadSmsOutbox();
+        } else {
+          loadOutbox && loadOutbox();
+        }
+      }, 200);
     } catch (e) {
       console.error(e);
       if (chSNRes) chSNRes.textContent = "Failed to send.";
@@ -1367,6 +1401,7 @@ document.addEventListener("click", (e) => {
   // chasing event wiring
   chEnabled?.addEventListener("change", () => {
     if (chSeqDefault) chSeqDefault.disabled = chEnabled.value !== "true";
+    if (chDelivery) chDelivery.disabled = chEnabled.value !== "true";
     saveChasingGlobals();
   });
   chHour?.addEventListener("change", saveChasingGlobals);
@@ -1374,6 +1409,7 @@ document.addEventListener("click", (e) => {
     if (chEnabled?.value !== "true") return;
     saveChasingGlobals();
   });
+  chDelivery?.addEventListener("change", saveChasingGlobals);
   chSaveBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     saveChasingGlobals();
@@ -1563,6 +1599,7 @@ document.addEventListener("click", (e) => {
       status: oaQuery.status || "all",
       page: String(oaPager.page),
       per_page: String(oaPager.per),
+      channel: "email",
     });
     if (oaQuery.search) params.set("search", oaQuery.search);
 
@@ -1631,6 +1668,146 @@ document.addEventListener("click", (e) => {
     }
   });
 
+  // ============================================================
+  // SMS ACTIVITY (Outbox)
+  // ============================================================
+
+  const saRows   = q("#sa_rows");
+  const saEmpty  = q("#sa_empty");
+  const saStatus = q("#sa_status");
+  const saSearch = q("#sa_search");
+  const saPer    = q("#sa_per");
+  const saPrev   = q("#sa_prev");
+  const saNext   = q("#sa_next");
+  const saInfo   = q("#sa_page_info");
+
+  const saPager = {
+    page: 1,
+    per: Number(saPer?.value || 50),
+    pages: 1,
+    total: 0,
+  };
+  let saItems = [];
+  let saQuery = { status: "all", search: "" };
+
+  function renderSmsOutbox() {
+    if (!saRows) return;
+    if (!saItems.length) {
+      saRows.innerHTML = "";
+      if (saEmpty) saEmpty.style.display = "block";
+      return;
+    }
+    if (saEmpty) saEmpty.style.display = "none";
+
+    saRows.innerHTML = saItems
+      .map((x) => {
+        const ui = friendlyOutboxStatus
+          ? friendlyOutboxStatus(x)
+          : { badge: x.status, text: "" };
+        const pill = `<span class="pill ${ui.badge}">${ui.badge}</span>`;
+        const message = (x.body || "").replace(/</g, "&lt;");
+        const detail = ui.text
+          ? `<div class="muted" style="font-size:12px">${ui.text}</div>`
+          : "";
+
+        return `
+          <tr>
+            <td>${fmtDateTime(x.created_at)}</td>
+            <td>
+              ${x.to_email || ""}
+              ${
+                x.customer_name
+                  ? `<div class="muted" style="font-size:12px">${x.customer_name}</div>`
+                  : ""
+              }
+            </td>
+            <td>${message}</td>
+            <td>${pill}${detail}</td>
+            <td style="text-align:right;">${x.attempt_count || 0}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  async function loadSmsOutbox() {
+    if (!saRows) return;
+    const params = new URLSearchParams({
+      status: saQuery.status || "all",
+      page: String(saPager.page),
+      per_page: String(saPager.per),
+      channel: "sms",
+    });
+    if (saQuery.search) params.set("search", saQuery.search);
+
+    saRows.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+    try {
+      const r = await fetch(`${OA_API}?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const d = await r.json();
+      saItems = d.items || [];
+      saPager.page = d.page;
+      saPager.per = d.per_page;
+      saPager.pages = d.pages;
+      saPager.total = d.total;
+      if (saInfo)
+        saInfo.textContent = `Page ${saPager.page} / ${saPager.pages} (${saPager.total} messages)`;
+      if (saPrev) saPrev.disabled = saPager.page <= 1;
+      if (saNext) saNext.disabled = saPager.page >= saPager.pages;
+    } catch (e) {
+      saItems = [];
+      saPager.pages = 1;
+      saPager.total = 0;
+      if (saInfo)
+        saInfo.textContent = `Page ${saPager.page} / ${saPager.pages} (${saPager.total} messages)`;
+      saRows.innerHTML = `<tr><td colspan="5" class="muted">Failed to load.</td></tr>`;
+      return;
+    }
+    renderSmsOutbox();
+  }
+
+  let saTimer = null;
+  saStatus?.addEventListener("change", () => {
+    saQuery.status = saStatus.value || "all";
+    saPager.page = 1;
+    loadSmsOutbox();
+  });
+  saPer?.addEventListener("change", () => {
+    saPager.per = Number(saPer.value) || 50;
+    saPager.page = 1;
+    loadSmsOutbox();
+  });
+  saPrev?.addEventListener("click", () => {
+    if (saPager.page > 1) {
+      saPager.page -= 1;
+      loadSmsOutbox();
+    }
+  });
+  saNext?.addEventListener("click", () => {
+    if (saPager.page < saPager.pages) {
+      saPager.page += 1;
+      loadSmsOutbox();
+    }
+  });
+  saSearch?.addEventListener("input", () => {
+    clearTimeout(saTimer);
+    saTimer = setTimeout(() => {
+      saQuery.search = (saSearch.value || "").trim();
+      saPager.page = 1;
+      loadSmsOutbox();
+    }, 250);
+  });
+
+  document.addEventListener("click", (e) => {
+    const tab = e.target.closest(".tab");
+    if (!tab) return;
+    if ((tab.dataset.tab || "") === "sms-activity") {
+      if (saItems.length === 0) loadSmsOutbox();
+    }
+  });
+
   // -----------------------
   // init on DOM ready
   // -----------------------
@@ -1641,6 +1818,9 @@ document.addEventListener("click", (e) => {
     // If activity tab is already active on load, pull immediately:
     if (q("#tab-activity")?.classList.contains("active")) {
       loadOutbox();
+    }
+    if (q("#tab-sms-activity")?.classList.contains("active")) {
+      loadSmsOutbox();
     }
   });
 })();

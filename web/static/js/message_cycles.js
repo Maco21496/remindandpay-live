@@ -15,22 +15,32 @@
   // modals (IDs from the HTML)
   const modalAdd          = document.getElementById("modal_add_step");
   const addOffsetInput    = document.getElementById("add_offset_days");
+  const addChannelSelect  = document.getElementById("add_channel");
   const addTemplateSelect = document.getElementById("add_template_key");
   const addErrorEl        = document.getElementById("add_error");
   const addSaveBtn        = document.getElementById("add_step_save");
 
   const modalEdit         = document.getElementById("modal_edit_step");
   const editOffsetInput   = document.getElementById("edit_offset_days");
+  const editChannelSel    = document.getElementById("edit_channel");
   const editTemplateSel   = document.getElementById("edit_template_key");
   const editErrorEl       = document.getElementById("edit_error");
   const editSaveBtn       = document.getElementById("edit_step_save");
+
+  const previewModal      = document.getElementById("mc_preview_modal");
+  const previewTitle      = document.getElementById("mc_preview_title");
+  const previewSubject    = document.getElementById("mc_preview_subject");
+  const previewBody       = document.getElementById("mc_preview_body");
+  const previewClose      = document.getElementById("mc_preview_close");
+  const previewDone       = document.getElementById("mc_preview_done");
 
   // ----- state -----
   let plans        = [];   // GET /api/chasing_plans
   let activePlanId = null;
   let activePlan   = null; // GET /api/chasing_plans/:id
-  let templates    = [];   // active email templates for dropdowns
+  let templates    = [];   // active templates for dropdowns
   let editingTriggerId = null;
+  let previewCustomer = null;
 
   // ----- helpers -----
   async function safeFetchJson(url, opts = {}) {
@@ -112,6 +122,7 @@
       const bodyPreview    = bodyPreviewRaw ? truncate(bodyPreviewRaw, 400) : "(no body)";
       const toneChip = tr.template_tag ? `<span class="mc-chip mc-chip--tone">${escapeHtml(tr.template_tag)}</span>` : "";
       const chanChip = `<span class="mc-chip mc-chip--chan">${escapeHtml(tr.channel || "email")}</span>`;
+      const previewLabel = tr.channel === "sms" ? "Preview SMS" : "Preview email";
 
       return `
         <div class="mc-step-card" data-trigger-id="${tr.id}">
@@ -140,6 +151,14 @@
             <div class="mc-step-row">
               <div class="mc-step-label">Message preview:</div>
               <div class="mc-step-value mc-step-preview">${escapeHtml(bodyPreview)}</div>
+            </div>
+            <div class="mc-step-row">
+              <div class="mc-step-label">Preview:</div>
+              <div class="mc-step-value">
+                <button class="mc-btn mc-btn--ghost mc-btn--xs js-trigger-preview" data-trigger-id="${tr.id}">
+                  ${previewLabel}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -176,14 +195,53 @@
     renderTriggersPanel();
   }
 
+  function renderTemplateOptions(channel, targetSelect) {
+    if (!targetSelect) return;
+    const filtered = templates.filter((t) => t.channel === channel);
+    const opts = filtered
+      .map((t) => {
+        const subj = t.subject || "(no subject)";
+        const label = t.channel === "sms" ? `${t.name || t.key}` : `${subj} — ${t.key}`;
+        return `<option value="${escapeHtml(t.key)}">${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    targetSelect.innerHTML = `<option value="">(choose template)</option>` + opts;
+  }
+
   async function loadTemplates() {
-    templates = await safeFetchJson("/api/reminder_templates?channel=email&active=true");
-    const opts = templates.map((t) => {
-      const subj = t.subject || "(no subject)";
-      return `<option value="${escapeHtml(t.key)}">${escapeHtml(subj)} — ${escapeHtml(t.key)}</option>`;
-    }).join("");
-    if (addTemplateSelect) addTemplateSelect.innerHTML = `<option value="">(choose template)</option>` + opts;
-    if (editTemplateSel)  editTemplateSel.innerHTML  = `<option value="">(choose template)</option>` + opts;
+    templates = await safeFetchJson("/api/reminder_templates?active=true");
+    renderTemplateOptions(addChannelSelect?.value || "email", addTemplateSelect);
+    renderTemplateOptions(editChannelSel?.value || "email", editTemplateSel);
+  }
+
+  async function loadPreviewCustomer() {
+    if (previewCustomer) return previewCustomer;
+    try {
+      const data = await safeFetchJson("/api/customers?limit=1");
+      const c = Array.isArray(data) && data.length ? data[0] : null;
+      previewCustomer = {
+        customer_name: c?.name || "Customer",
+        customer_email: c?.email || "customer@example.com",
+        customer_phone: c?.phone || "+44 7000 000000",
+        invoice_number: "INV-1001",
+        amount_due: "1250.00",
+        due_date: "2024-05-01",
+        days_overdue: 14,
+        payment_link_url: "https://pay.remindandpay.com/invoice/INV-1001",
+      };
+    } catch {
+      previewCustomer = {
+        customer_name: "Customer",
+        customer_email: "customer@example.com",
+        customer_phone: "+44 7000 000000",
+        invoice_number: "INV-1001",
+        amount_due: "1250.00",
+        due_date: "2024-05-01",
+        days_overdue: 14,
+        payment_link_url: "https://pay.remindandpay.com/invoice/INV-1001",
+      };
+    }
+    return previewCustomer;
   }
 
   // ----- sidebar click: choose a plan -----
@@ -242,6 +300,8 @@
   addTriggerBtn?.addEventListener("click", () => {
     if (!activePlanId || !modalAdd) return;
     if (addOffsetInput)    addOffsetInput.value = "";
+    if (addChannelSelect)  addChannelSelect.value = "email";
+    renderTemplateOptions(addChannelSelect?.value || "email", addTemplateSelect);
     if (addTemplateSelect) addTemplateSelect.value = "";
     if (addErrorEl) { addErrorEl.classList.add("hidden"); addErrorEl.textContent = ""; }
     openModal(modalAdd);
@@ -256,6 +316,7 @@
   addSaveBtn?.addEventListener("click", async () => {
     if (!activePlanId) return;
     const offset = Number(addOffsetInput?.value || 0);
+    const channel = addChannelSelect?.value || "email";
     const tkey   = addTemplateSelect?.value || "";
     if (!tkey) {
       if (addErrorEl) { addErrorEl.textContent = "Choose a template."; addErrorEl.classList.remove("hidden"); }
@@ -266,7 +327,7 @@
       await safeFetchJson(`/api/chasing_plans/${encodeURIComponent(activePlanId)}/steps`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset_days: offset, template_key: tkey, channel: "email" }),
+        body: JSON.stringify({ offset_days: offset, template_key: tkey, channel }),
       });
       closeModal(modalAdd);
       await loadPlanDetail(activePlanId);
@@ -301,6 +362,8 @@
     if (!trigger) return;
     editingTriggerId = triggerId;
     if (editOffsetInput) editOffsetInput.value = String(trigger.offset_days || 0);
+    if (editChannelSel) editChannelSel.value = trigger.channel || "email";
+    renderTemplateOptions(editChannelSel?.value || "email", editTemplateSel);
     if (editTemplateSel) editTemplateSel.value = trigger.template_key || "";
     if (editErrorEl) { editErrorEl.classList.add("hidden"); editErrorEl.textContent = ""; }
     openModal(modalEdit);
@@ -315,6 +378,7 @@
   editSaveBtn?.addEventListener("click", async () => {
     if (!activePlanId || !editingTriggerId) return;
     const newOffset = Number(editOffsetInput?.value || 0);
+    const channel = editChannelSel?.value || "email";
     const newKey    = editTemplateSel?.value || "";
     if (!newKey) {
       if (editErrorEl) { editErrorEl.textContent = "Choose a template."; editErrorEl.classList.remove("hidden"); }
@@ -325,7 +389,7 @@
       await safeFetchJson(`/api/chasing_plans/${encodeURIComponent(activePlanId)}/steps/${encodeURIComponent(editingTriggerId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offset_days: newOffset, template_key: newKey, channel: "email" }),
+        body: JSON.stringify({ offset_days: newOffset, template_key: newKey, channel }),
       });
       closeModal(modalEdit);
       await loadPlanDetail(activePlanId);
@@ -335,12 +399,70 @@
     }
   });
 
+  addChannelSelect?.addEventListener("change", () => {
+    renderTemplateOptions(addChannelSelect.value || "email", addTemplateSelect);
+    if (addTemplateSelect) addTemplateSelect.value = "";
+  });
+
+  editChannelSel?.addEventListener("change", () => {
+    renderTemplateOptions(editChannelSel.value || "email", editTemplateSel);
+  });
+
+  previewClose?.addEventListener("click", () => closeModal(previewModal));
+  previewDone?.addEventListener("click", () => closeModal(previewModal));
+
+  triggerListEl?.addEventListener("click", async (e) => {
+    const previewBtn = e.target.closest(".js-trigger-preview[data-trigger-id]");
+    if (!previewBtn) return;
+    const triggerId = previewBtn.getAttribute("data-trigger-id");
+    const trigger = (activePlan?.steps || []).find((t) => String(t.id) === String(triggerId));
+    if (!trigger) return;
+
+    const data = await loadPreviewCustomer();
+    try {
+      const resp = await safeFetchJson("/api/reminder_templates/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: trigger.channel || "email",
+          subject: trigger.template_subject || "",
+          body_html: trigger.template_body_html || "",
+          body_text: trigger.template_body_text || "",
+          data,
+        }),
+      });
+
+      if (previewTitle) {
+        previewTitle.textContent = trigger.channel === "sms" ? "SMS preview" : "Email preview";
+      }
+      if (previewSubject) {
+        previewSubject.textContent =
+          trigger.channel === "sms"
+            ? "SMS does not use a subject."
+            : (resp.subject || trigger.template_subject || "(no subject)");
+      }
+      if (previewBody) {
+        previewBody.innerHTML = "";
+        if (resp.body_html) {
+          previewBody.innerHTML = resp.body_html;
+        } else {
+          previewBody.textContent = resp.body_text || "(no message body)";
+        }
+      }
+      openModal(previewModal);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to render preview.");
+    }
+  });
+
   // ----- init -----
   async function init() {
     try {
       await loadTemplates();   // fill dropdowns in modals
       await loadPlansList();   // left sidebar
       renderTriggersPanel();   // right pane (none selected yet)
+      await loadPreviewCustomer();
     } catch (err) {
       console.error("Init failed:", err);
     }
