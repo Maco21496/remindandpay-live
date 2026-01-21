@@ -131,7 +131,7 @@
   function applyFilter(raw, filterSpec) {
     const value = (raw || '').trim();
     if (!filterSpec || !filterSpec.type || filterSpec.type === 'none') return value;
-    if (filterSpec.type === 'highlight_text') return '';
+    if (filterSpec.type === 'highlight_text') return filterSpec.selected_text || '';
     if (filterSpec.type === 'digits_only') {
       const match = value.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/);
       if (!match) return value.replace(/\D+/g, '');
@@ -212,7 +212,9 @@
     if (!fieldKey) return;
     const sample = fieldSamples[fieldKey] || '';
     const spec = templateJson.fields?.[fieldKey]?.filter || null;
-    const filtered = applyFilter(sample, spec);
+    const filtered = spec?.type === 'highlight_text' && spec.selected_text
+      ? spec.selected_text
+      : applyFilter(sample, spec);
     if (mapperFiltered) mapperFiltered.textContent = filtered || '—';
   }
 
@@ -572,12 +574,11 @@
     }
     templateJson.fields[activeFieldKey] = {
       ...(templateJson.fields[activeFieldKey] || {}),
-      filter: derived
+      filter: { type: 'highlight_text', selected_text: selectedText, derived }
     };
-    setFilterSelect(derived);
+    setFilterSelect(templateJson.fields[activeFieldKey].filter);
     updateFilterPreview(activeFieldKey);
-    const filtered = selectedText.trim();
-    updateFieldBadge(activeFieldKey, filtered || sample || 'mapped');
+    updateFieldBadge(activeFieldKey, selectedText.trim() || sample || 'mapped');
     if (mapperMsg) mapperMsg.textContent = 'Filter created from highlight.';
   }
   filterApplyBtn?.addEventListener('click', () => {
