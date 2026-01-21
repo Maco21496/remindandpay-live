@@ -31,6 +31,7 @@ from .routers.inbound_pdf import router as inbound_pdf_router
 from .routers.inbound_pdf_templates import router as inbound_pdf_templates_router
 from .routers.extractor_line_regions import router as extractor_line_regions_router
 from .routers.inbound_pdf_blocks import router as inbound_pdf_blocks_router
+from .routers.inbound_html_templates import router as inbound_html_templates_router
 from .routers.inbound_invoice_queue import router as inbound_invoice_queue_router
 from .routers.admin_app import router as admin_router
 
@@ -64,6 +65,7 @@ app.include_router(inbound_pdf_router)
 app.include_router(inbound_pdf_templates_router)  
 app.include_router(extractor_line_regions_router)
 app.include_router(inbound_pdf_blocks_router)
+app.include_router(inbound_html_templates_router)
 app.include_router(inbound_invoice_queue_router)
 app.include_router(admin_router)
 
@@ -186,3 +188,12 @@ def settings_invoice_import_page(request: Request, user = Depends(require_user))
     )
 
 
+@app.get("/settings/html-import")
+def settings_html_import_page(request: Request, user = Depends(require_user)):
+    return templates.TemplateResponse(
+        "settings_html_import.html",
+        {
+            "request": request,
+            "active": ""
+        },
+    )
