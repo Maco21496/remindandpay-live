@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: #f9fafb;
+      color: #111827;
+    }
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: 220px;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .brand {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .nav a {
+      color: #e2e8f0;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .nav a.active {
+      background: #1e293b;
+      color: #fff;
+      font-weight: 600;
+    }
+    .owner-pill {
+      margin-top: auto;
+      font-size: 12px;
+      color: #cbd5f5;
+    }
+    .content {
+      flex: 1;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 22px;
+    }
+    .section {
+      display: none;
+    }
+    .section.active {
+      display: block;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      background: #f3f4f6;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+    .tag-active {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .tag-paused {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .btn {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      cursor: pointer;
+    }
+    .btn-danger {
+      border-color: #ef4444;
+      color: #b91c1c;
+    }
+    .btn-primary {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #fff;
+    }
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      max-width: 640px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .form-field input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 14px;
+    }
+    .form-actions {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .form-message {
+      font-size: 13px;
+      color: #4b5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">Admin</div>
+      <nav class="nav">
+        <a href="/admin/dashboard?tab=users" data-admin-tab="users" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
+        <a href="/admin/dashboard?tab=sms" data-admin-tab="sms" class="{% if active_tab == 'sms' %}active{% endif %}">SMS</a>
+      </nav>
+      <div class="owner-pill">
+        Signed in as: <strong>{{ owner_email }}</strong>
+      </div>
+    </aside>
+    <main class="content">
+      <h1>Admin Dashboard</h1>
+
+      <section class="section {% if active_tab == 'users' %}active{% endif %}" data-admin-section="users">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:60px;">ID</th>
+              <th>Email</th>
+              <th style="width:120px;">Created</th>
+              <th style="width:80px;">Status</th>
+              <th style="width:220px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for u in users %}
+            <tr>
+              <td>{{ u.id }}</td>
+              <td>
+                {{ u.email }}
+                {% if (u.email or "").strip().lower() == "admin@remindandpay.com" %}
+                  <span class="tag" style="background:#e0f2fe;color:#075985;margin-left:4px;">owner</span>
+                {% endif %}
+              </td>
+              <td>{{ u.created_at }}</td>
+              <td>
+                {% if u.is_active %}
+                  <span class="tag tag-active">Active</span>
+                {% else %}
+                  <span class="tag tag-paused">Paused</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="actions">
+                  {% if u.is_active and (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+                    <form method="post" action="/admin/users/{{ u.id }}/pause">
+                      <button class="btn" type="submit">Pause</button>
+                    </form>
+                  {% elif (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+                    <form method="post" action="/admin/users/{{ u.id }}/unpause">
+                      <button class="btn" type="submit">Unpause</button>
+                    </form>
+                  {% endif %}
+
+                  {% if (u.email or "").strip().lower() != "admin@remindandpay.com" %}
+                    <form method="post" action="/admin/users/{{ u.id }}/deactivate" onsubmit="return confirm('Deactivate this user? They will not be able to log in.');">
+                      <button class="btn btn-danger" type="submit">Deactivate</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section {% if active_tab == 'sms' %}active{% endif %}" data-admin-section="sms">
+        <div class="card">
+          <h2>SMS Pricing</h2>
+          <p class="form-message">Set default SMS credit pricing and limits for new accounts.</p>
+          <div class="form-grid">
+            <label class="form-field">
+              Starting credits
+              <input type="number" min="0" id="sms-starting-credits">
+            </label>
+            <label class="form-field">
+              Monthly number cost
+              <input type="number" min="0" id="sms-monthly-number-cost">
+            </label>
+            <label class="form-field">
+              Send cost per SMS
+              <input type="number" min="0" id="sms-send-cost">
+            </label>
+            <label class="form-field">
+              Forward cost per SMS
+              <input type="number" min="0" id="sms-forward-cost">
+            </label>
+            <label class="form-field">
+              Suspend after (days)
+              <input type="number" min="0" id="sms-suspend-after-days">
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="sms-pricing-save" type="button">Save pricing</button>
+            <span class="form-message" id="sms-pricing-msg"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/admin_dashboard.js"></script>
+</body>
+</html>

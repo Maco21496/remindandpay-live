@@ -13,12 +13,7 @@ from .auth import require_owner
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-@router.get("/users", response_class=HTMLResponse)
-def admin_users_page(
-    request: Request,
-    db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
-):
+def _render_admin_dashboard(request: Request, db: Session, owner: User):
     """
     Owner-only management screen for all users.
     Shows basic info and allows pausing / unpausing / deactivating accounts.
@@ -29,14 +24,35 @@ def admin_users_page(
           .all()
     )
 
+    active_tab = request.query_params.get("tab", "users")
+
     return templates.TemplateResponse(
-        "admin_users.html",  # CHANGED: matches templates/admin_users.html
+        "admin_dashboard.html",
         {
             "request": request,
             "users": users,
             "owner_email": (owner.email or "").strip().lower(),
+            "active_tab": active_tab,
         },
     )
+
+
+@router.get("/users", response_class=HTMLResponse)
+def admin_users_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    return _render_admin_dashboard(request=request, db=db, owner=owner)
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def admin_dashboard_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    return _render_admin_dashboard(request=request, db=db, owner=owner)
 
 
 @router.post("/users/{user_id}/pause")
@@ -62,7 +78,7 @@ def admin_pause_user(
     db.add(target)
     db.commit()
 
-    return RedirectResponse(url="/admin/users", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/admin/dashboard?tab=users", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/users/{user_id}/unpause")
@@ -83,7 +99,7 @@ def admin_unpause_user(
     db.add(target)
     db.commit()
 
-    return RedirectResponse(url="/admin/users", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/admin/dashboard?tab=users", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/users/{user_id}/deactivate")
@@ -109,4 +125,4 @@ def admin_deactivate_user(
     db.add(target)
     db.commit()
 
-    return RedirectResponse(url="/admin/users", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/admin/dashboard?tab=users", status_code=status.HTTP_303_SEE_OTHER)
