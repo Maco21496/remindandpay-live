@@ -16,8 +16,10 @@ router = APIRouter(prefix="/api/outbox", tags=["outbox"])
 
 class OutboxRow(BaseModel):
     id: int
+    channel: str
     to_email: str
     subject: str
+    body: Optional[str] = None
     status: str                # queued|processing|sent|failed|canceled
     delivery_status: str       # queued|sent|delivered|bounced|complained|deferred
     attempt_count: int
@@ -45,6 +47,7 @@ class PageOut(BaseModel):
 @router.get("", response_model=PageOut)
 def list_outbox(
     status: str = "all",
+    channel: Optional[str] = None,
     search: Optional[str] = None,
     rule_id: Optional[int] = None,
     run_id: Optional[int] = None,
@@ -67,8 +70,10 @@ def list_outbox(
     q = (
         db.query(
             o.id,
+            o.channel,
             o.to_email,
             o.subject,
+            o.body,
             o.status,
             o.delivery_status,
             o.attempt_count,
@@ -97,6 +102,9 @@ def list_outbox(
     if customer_id is not None:
         q = q.filter(o.customer_id == customer_id)
 
+    if channel:
+        q = q.filter(o.channel == channel)
+
     if date_from:
         q = q.filter(func.date(o.created_at) >= date.fromisoformat(date_from))
     if date_to:
@@ -104,7 +112,7 @@ def list_outbox(
 
     if search:
         like = f"%{search.strip()}%"
-        q = q.filter(or_(o.to_email.ilike(like), o.subject.ilike(like)))
+        q = q.filter(or_(o.to_email.ilike(like), o.subject.ilike(like), o.body.ilike(like)))
 
     # status mapping (UI convenience)
     if status in ("queued", "processing", "sent", "failed", "canceled"):
@@ -125,8 +133,10 @@ def list_outbox(
     for r in rows:
         items.append(OutboxRow(
             id=r.id,
+            channel=r.channel,
             to_email=r.to_email,
             subject=r.subject or "",
+            body=r.body,
             status=r.status,
             delivery_status=r.delivery_status,
             attempt_count=r.attempt_count or 0,
