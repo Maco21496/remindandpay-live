@@ -35,6 +35,7 @@ from .routers.inbound_html_templates import router as inbound_html_templates_rou
 from .routers.inbound_invoice_queue import router as inbound_invoice_queue_router
 from .routers.admin_app import router as admin_router
 from .routers.sms_settings import router as sms_settings_router
+from .routers.sms_pricing import router as sms_pricing_router
 
 from .models import Base, Customer
 from .database import engine, get_db
@@ -70,6 +71,7 @@ app.include_router(inbound_html_templates_router)
 app.include_router(inbound_invoice_queue_router)
 app.include_router(admin_router)
 app.include_router(sms_settings_router)
+app.include_router(sms_pricing_router)
 
 # /auth endpoints (login/logout)
 app.include_router(auth_router.router)

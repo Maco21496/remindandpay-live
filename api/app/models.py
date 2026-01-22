@@ -65,6 +65,19 @@ class AccountSmsSettings(Base):
 
     user = relationship("User")
 
+class SmsPricingSettings(Base):
+    __tablename__ = "sms_pricing_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sms_starting_credits = Column(Integer, nullable=False, default=1000)
+    sms_monthly_number_cost = Column(Integer, nullable=False, default=100)
+    sms_send_cost = Column(Integer, nullable=False, default=5)
+    sms_forward_cost = Column(Integer, nullable=False, default=5)
+    sms_suspend_after_days = Column(Integer, nullable=False, default=14)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class Customer(Base):
     __tablename__ = "customers"
 
