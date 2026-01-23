@@ -52,6 +52,8 @@ class AccountSmsSettings(Base):
 
     twilio_phone_number = Column(String(30), nullable=True)
     twilio_phone_sid = Column(String(64), nullable=True)
+    twilio_subaccount_sid = Column(String(64), nullable=True)
+    twilio_auth_token_enc = Column(String(255), nullable=True)
 
     forwarding_enabled = Column(Boolean, nullable=False, default=False)
     forward_to_phone = Column(String(30), nullable=True)

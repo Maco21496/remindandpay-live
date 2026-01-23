@@ -1,15 +1,18 @@
 # api/app/routers/sms_settings.py
 from datetime import datetime
+import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+import requests
 
 from ..shared import APIRouter
 from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
+from ..crypto_secrets import encrypt_secret
 from .auth import require_user
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
 
@@ -39,6 +42,7 @@ class SmsTermsIn(BaseModel):
     accepted: bool
     terms_version: Optional[str] = None
     pricing_snapshot: Optional[dict] = None
+    country: Optional[str] = None
 
 class PricingOut(BaseModel):
     sms_starting_credits: int
@@ -114,6 +118,106 @@ def _build_pricing_snapshot(row: SmsPricingSettings) -> dict:
         "sms_suspend_after_days": row.sms_suspend_after_days,
     }
 
+def _twilio_auth_headers(account_sid: str, auth_token: str) -> tuple[str, str]:
+    return (account_sid, auth_token)
+
+def _provision_twilio_number(
+    *,
+    country: str,
+    webhook_base: str,
+    account_sid: str,
+    auth_sid: str,
+    auth_secret: str,
+) -> dict:
+    available_url = (
+        f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/AvailablePhoneNumbers/"
+        f"{country}/Local.json"
+    )
+    available_params = {
+        "SmsEnabled": "true",
+        "VoiceEnabled": "false",
+        "PageSize": 1,
+    }
+    r_available = requests.get(
+        available_url,
+        params=available_params,
+        auth=_twilio_auth_headers(auth_sid, auth_secret),
+        timeout=20,
+    )
+    r_available.raise_for_status()
+    data = r_available.json()
+    numbers = data.get("available_phone_numbers") or []
+    if not numbers:
+        raise HTTPException(status_code=400, detail="No available Twilio numbers for this country.")
+    phone_number = numbers[0].get("phone_number")
+    if not phone_number:
+        raise HTTPException(status_code=502, detail="Twilio did not return a phone number.")
+
+    inbound_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/inbound"
+    status_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/status"
+    purchase_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/IncomingPhoneNumbers.json"
+    purchase_payload = {
+        "PhoneNumber": phone_number,
+        "SmsUrl": inbound_url,
+        "SmsMethod": "POST",
+        "StatusCallback": status_url,
+        "StatusCallbackMethod": "POST",
+    }
+    r_purchase = requests.post(
+        purchase_url,
+        data=purchase_payload,
+        auth=_twilio_auth_headers(auth_sid, auth_secret),
+        timeout=20,
+    )
+    r_purchase.raise_for_status()
+    purchase = r_purchase.json()
+    return {
+        "phone_number": purchase.get("phone_number") or phone_number,
+        "phone_sid": purchase.get("sid"),
+    }
+
+def _ensure_twilio_subaccount(
+    *,
+    user_email: str,
+    webhook_base: str,
+    country: str,
+) -> dict:
+    master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
+    api_key_sid = (os.getenv("TWILIO_API_KEY_SID", "") or "").strip()
+    api_key_secret = (os.getenv("TWILIO_API_KEY_SECRET", "") or "").strip()
+    if not master_sid or not api_key_sid or not api_key_secret:
+        raise HTTPException(status_code=400, detail="Twilio API key credentials not configured.")
+
+    create_url = "https://api.twilio.com/2010-04-01/Accounts.json"
+    payload = {"FriendlyName": f"RemindPay {user_email or 'Account'}"}
+    r_create = requests.post(
+        create_url,
+        data=payload,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    r_create.raise_for_status()
+    data = r_create.json()
+    sub_sid = data.get("sid")
+    sub_token = data.get("auth_token")
+    if not sub_sid or not sub_token:
+        raise HTTPException(status_code=502, detail="Twilio did not return subaccount credentials.")
+
+    provisioned = _provision_twilio_number(
+        country=country,
+        webhook_base=webhook_base,
+        account_sid=sub_sid,
+        auth_sid=api_key_sid,
+        auth_secret=api_key_secret,
+    )
+
+    return {
+        "subaccount_sid": sub_sid,
+        "auth_token": sub_token,
+        "phone_number": provisioned.get("phone_number"),
+        "phone_sid": provisioned.get("phone_sid"),
+    }
+
 @router.get("/pricing", response_model=PricingOut)
 def get_pricing(
     db: Session = Depends(get_db),
@@ -157,12 +261,27 @@ def enable_sms(
     row = _ensure_sms_settings(db, user.id)
     pricing = _ensure_pricing(db)
     snapshot = payload.pricing_snapshot or _build_pricing_snapshot(pricing)
+    webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
+    country = (payload.country or os.getenv("TWILIO_DEFAULT_COUNTRY", "GB") or "GB").upper()
+    if not webhook_base:
+        raise HTTPException(status_code=400, detail="TWILIO_WEBHOOK_BASE_URL is not configured.")
 
     row.enabled = True
     row.terms_accepted_at = datetime.utcnow()
     row.terms_version = (payload.terms_version or "v1")[:32]
     row.terms_accepted_ip = request.client.host if request.client else None
     row.accepted_pricing_snapshot = snapshot
+
+    if not row.twilio_subaccount_sid or not row.twilio_auth_token_enc:
+        provisioned = _ensure_twilio_subaccount(
+            user_email=user.email or "",
+            webhook_base=webhook_base,
+            country=country,
+        )
+        row.twilio_subaccount_sid = provisioned["subaccount_sid"]
+        row.twilio_auth_token_enc = encrypt_secret(provisioned["auth_token"])
+        row.twilio_phone_number = provisioned.get("phone_number")
+        row.twilio_phone_sid = provisioned.get("phone_sid")
 
     if row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
