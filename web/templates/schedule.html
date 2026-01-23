@@ -15,6 +15,7 @@
     <button class="tab active" data-tab="statements">Statements</button>
     <button class="tab" data-tab="chasing">Chasing</button>
     <button class="tab" data-tab="activity">Email activity</button>
+    <button class="tab" data-tab="sms-activity">SMS activity</button>
   </div>
 
 <!-- ================= STATEMENTS ================= -->
@@ -266,7 +267,7 @@
       <div class="card__head">
         <h3>Manual send</h3>
         <p class="muted">
-          Send chasing emails immediately. Choose a cycle (or keep “Use defaults”) and optionally pick recipients.
+          Send chasing reminders immediately. Choose a cycle (or keep “Use defaults”) and optionally pick recipients.
         </p>
       </div>
 
@@ -286,6 +287,15 @@
               <label style="font-weight:600;">Recipients</label>
               <button type="button" id="ch_sendnow_customers" class="btn sm btn--ghost">All customers…</button>
               <span id="ch_sendnow_summary" class="muted" style="white-space:nowrap;">All included customers</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-weight:600;">Delivery</label>
+              <select id="ch_sendnow_delivery">
+                <option value="email">Email only</option>
+                <option value="sms">SMS only</option>
+                <option value="both">Email + SMS</option>
+              </select>
             </div>
           </div>
 
@@ -318,7 +328,7 @@
                 <span class="help-wrapper" tabindex="0">
                   <span class="info-icon">i</span>
                   <span class="help-tooltip">
-                    Turn this Off to stop all chasing emails.
+                    Turn this Off to stop all chasing reminders.
                     (You can still send manually from “Manual send”.)
                   </span>
                 </span>
@@ -331,6 +341,28 @@
                   <option value="false">Off</option>
                 </select>
                 <!-- JS mounts the .yn-toggle pill here -->
+              </div>
+            </div>
+
+            <!-- ROW 2: Delivery mode -->
+            <div class="stmt-row">
+              <label class="stmt-label">
+                Delivery mode
+                <span class="help-wrapper" tabindex="0">
+                  <span class="info-icon">i</span>
+                  <span class="help-tooltip" style="max-width:280px;">
+                    Choose whether chasing uses email, SMS, or both. SMS requires
+                    an active SMS plan in Settings.
+                  </span>
+                </span>
+              </label>
+
+              <div class="stmt-control">
+                <select id="ch_delivery_mode">
+                  <option value="email">Email only</option>
+                  <option value="sms">SMS only</option>
+                  <option value="both">Email + SMS</option>
+                </select>
               </div>
             </div>
 
@@ -474,6 +506,55 @@
           <tbody id="oa_rows"></tbody>
         </table>
         <div id="oa_empty" class="empty" style="display:none;">No messages.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SMS ACTIVITY ================= -->
+  <section id="tab-sms-activity" class="tab-pane">
+    <div class="panel" style="margin-top:12px;">
+      <div class="panel__head">
+        <div class="filters" style="gap:10px; flex-wrap:wrap;">
+          <select id="sa_status" title="Filter status">
+            <option value="all">All statuses</option>
+            <option value="queued">Queued</option>
+            <option value="processing">Processing</option>
+            <option value="sent">Sent</option>
+            <option value="delivered">Delivered</option>
+            <option value="bounced">Bounced</option>
+            <option value="failed">Failed</option>
+          </select>
+
+          <input id="sa_search" placeholder="Search number or message…" />
+
+          <select id="sa_per" title="Rows per page">
+            <option value="20">20 / page</option>
+            <option value="50" selected>50 / page</option>
+            <option value="100">100 / page</option>
+          </select>
+        </div>
+
+        <div class="filters" style="gap:8px;">
+          <button id="sa_prev" class="btn btn--ghost">Prev</button>
+          <span id="sa_page_info" class="muted"></span>
+          <button id="sa_next" class="btn btn--ghost">Next</button>
+        </div>
+      </div>
+
+      <div style="padding:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>To</th>
+              <th>Message</th>
+              <th>Status</th>
+              <th style="text-align:right;">Attempts</th>
+            </tr>
+          </thead>
+          <tbody id="sa_rows"></tbody>
+        </table>
+        <div id="sa_empty" class="empty" style="display:none;">No SMS messages.</div>
       </div>
     </div>
   </section>
