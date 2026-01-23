@@ -250,6 +250,30 @@
   </div>
 </section>
 
+<div id="sms_enable_modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:1000;">
+  <div style="background:#fff; width:700px; max-width:90vw; margin:60px auto; border-radius:12px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2);">
+    <div style="padding:14px 16px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between;">
+      <h3 style="margin:0; font-size:18px;">Enable SMS</h3>
+      <button id="sms_enable_close" class="btn btn--ghost">Close</button>
+    </div>
+    <div style="padding:16px;">
+      <p class="muted" style="margin-top:0;">Before you continue, review the SMS pricing and terms below.</p>
+      <ul id="sms_enable_terms" class="muted" style="margin:0 0 12px 18px; line-height:1.6;">
+        <li>Loading pricing…</li>
+      </ul>
+      <label style="display:flex; align-items:center; gap:8px; font-size:14px;">
+        <input type="checkbox" id="sms_enable_accept">
+        I accept these SMS terms and pricing.
+      </label>
+      <div class="field-row" style="gap:8px; align-items:center; margin-top:14px;">
+        <button id="sms_enable_confirm" class="btn">Enable SMS</button>
+        <button id="sms_enable_cancel" class="btn btn--ghost">Cancel</button>
+        <span id="sms_enable_msg" class="muted"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- RESTORE DEFAULTS TAB -->
 <section id="tab_restore" class="panel" style="max-width:820px; margin-top:12px; display:none;">
   <div class="panel__head"><h2>Restore defaults</h2></div>

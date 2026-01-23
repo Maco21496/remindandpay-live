@@ -1,6 +1,6 @@
 CREATE TABLE sms_credit_ledger (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
+    user_id INT NOT NULL,
     entry_type ENUM('credit', 'debit') NOT NULL,
     amount INT NOT NULL,
     reason VARCHAR(120) NOT NULL,

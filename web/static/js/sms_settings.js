@@ -11,6 +11,16 @@
   const forwardToInput = $("sms_forward_to");
   const msg = $("sms_msg");
   const saveBtn = $("sms_save");
+  const enableModal = $("sms_enable_modal");
+  const enableClose = $("sms_enable_close");
+  const enableCancel = $("sms_enable_cancel");
+  const enableConfirm = $("sms_enable_confirm");
+  const enableAccept = $("sms_enable_accept");
+  const enableMsg = $("sms_enable_msg");
+  const enableTerms = $("sms_enable_terms");
+
+  let currentEnabled = false;
+  let pricingSnapshot = null;
 
   function setSelectValue(sel, val) {
     if (!sel) return;
@@ -23,12 +33,63 @@
     sel.setAttribute("value", v);
   }
 
+  function setFieldsEnabled(isEnabled) {
+    const toggle = (el, enabled) => {
+      if (!el) return;
+      el.disabled = !enabled;
+    };
+    toggle(bundleInput, isEnabled);
+    toggle(forwardingSel, isEnabled);
+    toggle(forwardToInput, isEnabled);
+    toggle(saveBtn, isEnabled);
+  }
+
+  function updateTermsList(snapshot) {
+    if (!enableTerms) return;
+    if (!snapshot) {
+      enableTerms.innerHTML = "<li>Unable to load pricing.</li>";
+      return;
+    }
+    enableTerms.innerHTML = `
+      <li>${snapshot.sms_starting_credits} free SMS credits on activation.</li>
+      <li>${snapshot.sms_monthly_number_cost} credits per month for your dedicated number.</li>
+      <li>${snapshot.sms_send_cost} credits per SMS send.</li>
+      <li>${snapshot.sms_forward_cost} credits per SMS forwarded reply.</li>
+      <li>Number suspended after ${snapshot.sms_suspend_after_days} days of insufficient balance.</li>
+    `;
+  }
+
+  function openEnableModal() {
+    if (!enableModal) return;
+    if (enableAccept) enableAccept.checked = false;
+    if (enableMsg) enableMsg.textContent = "";
+    enableModal.style.display = "block";
+  }
+
+  function closeEnableModal() {
+    if (!enableModal) return;
+    enableModal.style.display = "none";
+  }
+
+  async function loadPricing() {
+    try {
+      const r = await fetch("/api/sms/pricing", { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      pricingSnapshot = await r.json();
+      updateTermsList(pricingSnapshot);
+    } catch {
+      pricingSnapshot = null;
+      updateTermsList(null);
+    }
+  }
+
   async function loadSmsSettings() {
     try {
       const r = await fetch("/api/sms/settings", { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
       const data = await r.json();
 
+      currentEnabled = Boolean(data.enabled);
       setSelectValue(enabledSel, data.enabled ? "true" : "false");
       setSelectValue(forwardingSel, data.forwarding_enabled ? "true" : "false");
 
@@ -38,9 +99,48 @@
       if (phoneNumberInput) phoneNumberInput.value = data.twilio_phone_number || "";
       if (phoneSidInput) phoneSidInput.value = data.twilio_phone_sid || "";
       if (forwardToInput) forwardToInput.value = data.forward_to_phone || "";
+      setFieldsEnabled(currentEnabled);
       if (msg) msg.textContent = "";
     } catch {
       if (msg) msg.textContent = "Failed to load SMS settings.";
+    }
+  }
+
+  async function enableSms() {
+    if (!enableAccept?.checked) {
+      if (enableMsg) enableMsg.textContent = "Please accept the terms to continue.";
+      return;
+    }
+    if (enableMsg) enableMsg.textContent = "Enabling…";
+    try {
+      if (!pricingSnapshot) {
+        await loadPricing();
+      }
+      const r = await fetch("/api/sms/enable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accepted: true,
+          terms_version: "v1",
+          pricing_snapshot: pricingSnapshot,
+        }),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(`Enable failed ${r.status} ${t}`);
+      }
+      const data = await r.json();
+      currentEnabled = Boolean(data.enabled);
+      setSelectValue(enabledSel, data.enabled ? "true" : "false");
+      if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
+      setFieldsEnabled(currentEnabled);
+      closeEnableModal();
+      if (msg) msg.textContent = "SMS enabled.";
+    } catch {
+      if (enableMsg) enableMsg.textContent = "Enable failed.";
+      setSelectValue(enabledSel, "false");
+      currentEnabled = false;
+      setFieldsEnabled(false);
     }
   }
 
@@ -72,6 +172,26 @@
       if (msg) msg.textContent = "Save failed.";
     }
   }
+
+  enabledSel?.addEventListener("change", () => {
+    const wantEnabled = enabledSel.value === "true";
+    if (wantEnabled && !currentEnabled) {
+      setSelectValue(enabledSel, "false");
+      loadPricing();
+      openEnableModal();
+    } else {
+      currentEnabled = wantEnabled;
+      setFieldsEnabled(currentEnabled);
+    }
+  });
+
+  enableConfirm?.addEventListener("click", enableSms);
+  enableCancel?.addEventListener("click", () => {
+    closeEnableModal();
+  });
+  enableClose?.addEventListener("click", () => {
+    closeEnableModal();
+  });
 
   saveBtn?.addEventListener("click", saveSmsSettings);
 

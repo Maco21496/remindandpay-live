@@ -60,6 +60,11 @@ class AccountSmsSettings(Base):
     credits_balance = Column(Integer, nullable=False, default=0)
     free_credits = Column(Integer, nullable=False, default=0)
 
+    terms_accepted_at = Column(DateTime, nullable=True)
+    terms_version = Column(String(32), nullable=True)
+    terms_accepted_ip = Column(String(64), nullable=True)
+    accepted_pricing_snapshot = Column(JSON, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
