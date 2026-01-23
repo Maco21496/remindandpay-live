@@ -78,6 +78,22 @@ class SmsPricingSettings(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class SmsCreditLedger(Base):
+    __tablename__ = "sms_credit_ledger"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    entry_type = Column(Enum("credit", "debit", name="sms_ledger_entry_type"), nullable=False)
+    amount = Column(Integer, nullable=False)
+    reason = Column(String(120), nullable=False)
+    reference_id = Column(String(64), nullable=True)
+    metadata = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
+
 class Customer(Base):
     __tablename__ = "customers"
 

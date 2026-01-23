@@ -3,11 +3,12 @@ from typing import Optional
 
 from fastapi import Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AccountSmsSettings
+from ..models import AccountSmsSettings, SmsCreditLedger
 from .auth import require_user
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
 
@@ -46,12 +47,42 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     db.refresh(row)
     return row
 
+def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
+    has_entries = (
+        db.query(SmsCreditLedger.id)
+        .filter(SmsCreditLedger.user_id == user_id)
+        .first()
+        is not None
+    )
+    if not has_entries:
+        return False, 0
+
+    total = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (SmsCreditLedger.entry_type == "credit", SmsCreditLedger.amount),
+                        else_=-SmsCreditLedger.amount,
+                    )
+                ),
+                0,
+            )
+        )
+        .filter(SmsCreditLedger.user_id == user_id)
+        .scalar()
+    )
+    return True, int(total or 0)
+
 @router.get("/settings", response_model=SmsSettingsOut)
 def get_sms_settings(
     db: Session = Depends(get_db),
     user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
+
     return SmsSettingsOut(
         enabled=bool(row.enabled),
         twilio_phone_number=row.twilio_phone_number,
@@ -59,7 +90,7 @@ def get_sms_settings(
         forwarding_enabled=bool(row.forwarding_enabled),
         forward_to_phone=row.forward_to_phone,
         bundle_size=row.bundle_size or 1000,
-        credits_balance=row.credits_balance or 0,
+        credits_balance=credits_balance,
         free_credits=row.free_credits or 0,
     )
 
@@ -99,6 +130,9 @@ def update_sms_settings(
     db.commit()
     db.refresh(row)
 
+    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
+
     return SmsSettingsOut(
         enabled=bool(row.enabled),
         twilio_phone_number=row.twilio_phone_number,
@@ -106,6 +140,6 @@ def update_sms_settings(
         forwarding_enabled=bool(row.forwarding_enabled),
         forward_to_phone=row.forward_to_phone,
         bundle_size=row.bundle_size or 1000,
-        credits_balance=row.credits_balance or 0,
+        credits_balance=credits_balance,
         free_credits=row.free_credits or 0,
     )
