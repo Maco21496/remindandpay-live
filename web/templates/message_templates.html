@@ -125,9 +125,16 @@
         <div class="mc-hint">Example: 14 means “send when oldest unpaid invoice is 14+ days overdue”.</div>
       </div>
       <div class="mc-field">
+        <label class="mc-label">Channel</label>
+        <select id="add_channel" class="mc-input">
+          <option value="email">Email</option>
+          <option value="sms">SMS</option>
+        </select>
+      </div>
+      <div class="mc-field">
         <label class="mc-label">Template</label>
         <select id="add_template_key" class="mc-input"></select>
-        <div class="mc-hint">Only active email templates are listed.</div>
+        <div class="mc-hint">Only active templates for the chosen channel are listed.</div>
       </div>
       <div id="add_error" class="mc-error hidden"></div>
     </div>
@@ -151,6 +158,13 @@
         <div class="mc-hint">Change only if this should trigger on a different overdue day.</div>
       </div>
       <div class="mc-field">
+        <label class="mc-label">Channel</label>
+        <select id="edit_channel" class="mc-input">
+          <option value="email">Email</option>
+          <option value="sms">SMS</option>
+        </select>
+      </div>
+      <div class="mc-field">
         <label class="mc-label">Template</label>
         <select id="edit_template_key" class="mc-input"></select>
         <div class="mc-hint">Pick a different template for this trigger.</div>
@@ -160,6 +174,29 @@
     <div class="mc-modal__foot">
       <button id="edit_step_save" class="mc-btn mc-btn--primary mc-btn--sm">Save changes</button>
       <button class="mc-btn mc-btn--ghost mc-btn--sm" data-close-edit>Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PREVIEW MODAL (plans) ===== -->
+<div id="mc_preview_modal" class="mc-modal hidden">
+  <div class="mc-modal__box" style="max-width:760px;">
+    <div class="mc-modal__head">
+      <div class="mc-modal__title" id="mc_preview_title">Message preview</div>
+      <button class="mc-modal__close" id="mc_preview_close">✕</button>
+    </div>
+    <div class="mc-modal__body">
+      <div class="mc-field">
+        <label class="mc-label">Subject</label>
+        <div id="mc_preview_subject" class="mc-input" style="height:auto; min-height:36px; padding:8px;"></div>
+      </div>
+      <div class="mc-field">
+        <label class="mc-label">Message</label>
+        <div id="mc_preview_body" class="mc-input" style="height:auto; min-height:140px; padding:8px; white-space:pre-wrap;"></div>
+      </div>
+    </div>
+    <div class="mc-modal__foot">
+      <button class="mc-btn mc-btn--ghost mc-btn--sm" id="mc_preview_done">Close</button>
     </div>
   </div>
 </div>
