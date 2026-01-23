@@ -88,7 +88,7 @@ class SmsCreditLedger(Base):
     amount = Column(Integer, nullable=False)
     reason = Column(String(120), nullable=False)
     reference_id = Column(String(64), nullable=True)
-    details = Column(JSON, nullable=True)
+    details = Column("metadata", JSON, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

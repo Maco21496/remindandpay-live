@@ -5,7 +5,7 @@ CREATE TABLE sms_credit_ledger (
     amount INT NOT NULL,
     reason VARCHAR(120) NOT NULL,
     reference_id VARCHAR(64),
-    details JSON,
+    metadata JSON,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX ix_sms_credit_ledger_user_id (user_id),
     CONSTRAINT fk_sms_credit_ledger_user
