@@ -9,6 +9,7 @@
 <nav id="set_tabs" class="tabbar" style="margin:0 0 12px 0;">
   <button class="tab is-active" data-tab="app">App settings</button>
   <button class="tab" data-tab="email">Email settings</button>
+  <button class="tab" data-tab="sms">SMS settings</button>
   <button class="tab" data-tab="import">Invoice import</button>
   <button class="tab" data-tab="restore">Restore defaults</button>
   <div style="flex:1"></div>
@@ -175,6 +176,80 @@
   </div>
 </section>
 
+<!-- SMS SETTINGS TAB -->
+<section id="tab_sms" class="panel" style="max-width:900px; margin-top:12px; display:none;">
+  <div class="panel__head"><h2>SMS delivery (Twilio)</h2></div>
+  <div class="content" style="padding:12px;">
+    <div class="grid" style="gap:14px;">
+      <div class="muted">
+        SMS is off by default. When enabled, reminders can be sent via your
+        dedicated Twilio number. You can also forward replies to a mobile number.
+      </div>
+
+      <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
+        <h3 style="margin:0 0 10px 0; font-size:16px;">SMS status</h3>
+        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
+          <div class="field">
+            <label>SMS enabled</label>
+            <select id="sms_enabled" style="height:36px;padding:0 8px;">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>SMS bundle size</label>
+            <input id="sms_bundle_size" type="number" min="100" step="100" value="1000" style="height:36px;padding:0 8px;">
+            <div class="muted" style="margin-top:4px;">Used for credit top-ups (e.g. 1000 SMS).</div>
+          </div>
+          <div class="field">
+            <label>Credits balance</label>
+            <input id="sms_credits" type="number" min="0" step="1" value="0" style="height:36px;padding:0 8px;" disabled>
+            <div class="muted" style="margin-top:4px;">Read-only until billing is enabled.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
+        <h3 style="margin:0 0 10px 0; font-size:16px;">Dedicated number</h3>
+        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
+          <div class="field">
+            <label>Twilio phone number</label>
+            <input id="sms_phone_number" placeholder="+44..." style="height:36px;padding:0 8px;" disabled>
+            <div class="muted" style="margin-top:4px;">Provisioned automatically when SMS is enabled.</div>
+          </div>
+          <div class="field">
+            <label>Twilio phone SID</label>
+            <input id="sms_phone_sid" placeholder="PNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="height:36px;padding:0 8px;" disabled>
+          </div>
+        </div>
+      </div>
+
+      <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
+        <h3 style="margin:0 0 10px 0; font-size:16px;">Reply forwarding</h3>
+        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
+          <div class="field">
+            <label>Forward replies</label>
+            <select id="sms_forwarding_enabled" style="height:36px;padding:0 8px;">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Forward to mobile</label>
+            <input id="sms_forward_to" placeholder="+44..." style="height:36px;padding:0 8px;">
+            <div class="muted" style="margin-top:4px;">Replies will also appear in SMS activity.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row" style="gap:8px; align-items:center; margin-top:8px;">
+        <button id="sms_save" class="btn">Save SMS settings</button>
+        <span id="sms_msg" class="muted"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- RESTORE DEFAULTS TAB -->
 <section id="tab_restore" class="panel" style="max-width:820px; margin-top:12px; display:none;">
   <div class="panel__head"><h2>Restore defaults</h2></div>
@@ -228,6 +303,7 @@
 <!-- Scripts -->
 <script src="/static/js/settings.js"></script>
 <script src="/static/js/email_settings_ui.js"></script>
+<script src="/static/js/sms_settings.js"></script>
 
 <script>
   // INLINE TAB SWITCHER ON /settings (Invoice import redirects to separate page)
@@ -237,12 +313,14 @@
 
     const app     = document.getElementById('tab_app');
     const email   = document.getElementById('tab_email');
+    const sms     = document.getElementById('tab_sms');
     const restore = document.getElementById('tab_restore');
 
     function showOnly(which) {
-      if (!app || !email || !restore) return;
+      if (!app || !email || !sms || !restore) return;
       app.style.display     = (which === 'app')     ? 'block' : 'none';
       email.style.display   = (which === 'email')   ? 'block' : 'none';
+      sms.style.display     = (which === 'sms')     ? 'block' : 'none';
       restore.style.display = (which === 'restore') ? 'block' : 'none';
     }
 
@@ -266,6 +344,9 @@
       if (which === 'email') {
         showOnly('email');
         window.dispatchEvent(new Event('email_settings_tab_activated'));
+      } else if (which === 'sms') {
+        showOnly('sms');
+        window.dispatchEvent(new Event('sms_settings_tab_activated'));
       } else if (which === 'restore') {
         showOnly('restore');
       } else {
