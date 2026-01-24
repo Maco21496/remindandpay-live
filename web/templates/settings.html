@@ -188,25 +188,21 @@
 
       <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
         <h3 style="margin:0 0 10px 0; font-size:16px;">SMS status</h3>
-        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
+        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px; align-items:end;">
           <div class="field">
             <label>SMS enabled</label>
             <select id="sms_enabled" style="height:36px;padding:0 8px;">
               <option value="false">Off</option>
               <option value="true">On</option>
             </select>
+            <div id="sms_enabled_hint" class="muted" style="margin-top:4px;"></div>
           </div>
-          <div class="field">
-            <label>SMS bundle size</label>
-            <input id="sms_bundle_size" type="number" min="100" step="100" value="1000" style="height:36px;padding:0 8px;">
-            <div class="muted" style="margin-top:4px;">Used for credit top-ups (e.g. 1000 SMS).</div>
-          </div>
-          <div class="field">
-            <label>Credits balance</label>
-            <input id="sms_credits" type="number" min="0" step="1" value="0" style="height:36px;padding:0 8px;" disabled>
-            <div class="muted" style="margin-top:4px;">Read-only until billing is enabled.</div>
+          <div class="muted" style="padding-bottom:6px;">
+            Your SMS balance is shown in the header and opens SMS activity.
           </div>
         </div>
+        <input id="sms_bundle_size" type="number" min="100" step="100" value="1000" style="display:none;">
+        <input id="sms_credits" type="number" min="0" step="1" value="0" style="display:none;" disabled>
       </div>
 
       <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
@@ -350,6 +346,16 @@
 
     // default
     showOnly('app');
+
+    if (window.location.hash === '#sms') {
+      const smsTab = tabs.querySelector('.tab[data-tab="sms"]');
+      if (smsTab) {
+        tabs.querySelectorAll('.tab').forEach(t=>t.classList.remove('is-active'));
+        smsTab.classList.add('is-active');
+        showOnly('sms');
+        window.dispatchEvent(new Event('sms_settings_tab_activated'));
+      }
+    }
 
     tabs.addEventListener('click', (e)=>{
       const btn = e.target.closest('.tab');

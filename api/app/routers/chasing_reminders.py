@@ -253,7 +253,10 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     )
     if row:
         return row
-    row = AccountSmsSettings(user_id=user_id)
+    row = AccountSmsSettings(
+        user_id=user_id,
+        chasing_delivery_mode="email",
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
