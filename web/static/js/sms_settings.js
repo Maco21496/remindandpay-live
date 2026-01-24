@@ -18,6 +18,8 @@
   const enableAccept = $("sms_enable_accept");
   const enableMsg = $("sms_enable_msg");
   const enableTerms = $("sms_enable_terms");
+  const balanceChip = $("sms_balance_chip");
+  const enabledHint = $("sms_enabled_hint");
 
   let currentEnabled = false;
   let pricingSnapshot = null;
@@ -38,10 +40,37 @@
       if (!el) return;
       el.disabled = !enabled;
     };
-    toggle(bundleInput, isEnabled);
     toggle(forwardingSel, isEnabled);
     toggle(forwardToInput, isEnabled);
     toggle(saveBtn, isEnabled);
+  }
+
+  function lockEnabledToggle(isEnabled) {
+    if (!enabledSel) return;
+    enabledSel.disabled = isEnabled;
+    if (enabledHint) {
+      enabledHint.textContent = isEnabled
+        ? "SMS is active and cannot be turned off."
+        : "Turning on will provision your dedicated number.";
+    }
+  }
+
+  function updateBalanceChip(isEnabled, balance) {
+    if (!balanceChip) return;
+    const label = isEnabled ? String(balance ?? 0) : "Enable";
+    balanceChip.textContent = `SMS balance: ${label}`;
+    balanceChip.setAttribute(
+      "aria-label",
+      isEnabled ? `SMS balance ${label}` : "Enable SMS"
+    );
+    balanceChip.title = isEnabled ? "Open SMS activity" : "Enable SMS";
+    balanceChip.href = isEnabled ? "/schedule" : "#tab_sms";
+    balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
+  }
+
+  function activateSmsTab() {
+    const smsTabBtn = document.querySelector('#set_tabs .tab[data-tab="sms"]');
+    smsTabBtn?.click();
   }
 
   function updateTermsList(snapshot) {
@@ -100,6 +129,8 @@
       if (phoneSidInput) phoneSidInput.value = data.twilio_phone_sid || "";
       if (forwardToInput) forwardToInput.value = data.forward_to_phone || "";
       setFieldsEnabled(currentEnabled);
+      lockEnabledToggle(currentEnabled);
+      updateBalanceChip(currentEnabled, data.credits_balance);
       if (msg) msg.textContent = "";
     } catch {
       if (msg) msg.textContent = "Failed to load SMS settings.";
@@ -134,6 +165,8 @@
       setSelectValue(enabledSel, data.enabled ? "true" : "false");
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
       setFieldsEnabled(currentEnabled);
+      lockEnabledToggle(currentEnabled);
+      updateBalanceChip(currentEnabled, data.credits_balance);
       closeEnableModal();
       if (msg) msg.textContent = "SMS enabled.";
     } catch {
@@ -141,6 +174,8 @@
       setSelectValue(enabledSel, "false");
       currentEnabled = false;
       setFieldsEnabled(false);
+      lockEnabledToggle(false);
+      updateBalanceChip(false, 0);
     }
   }
 
@@ -167,6 +202,7 @@
       }
       const data = await r.json();
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
+      updateBalanceChip(Boolean(data.enabled), data.credits_balance);
       if (msg) msg.textContent = "Saved.";
     } catch {
       if (msg) msg.textContent = "Save failed.";
@@ -200,6 +236,15 @@
   });
 
   document.addEventListener("DOMContentLoaded", () => {
+    updateBalanceChip(false, 0);
+    balanceChip?.addEventListener("click", (e) => {
+      if (balanceChip.dataset.balanceState === "disabled") {
+        e.preventDefault();
+        activateSmsTab();
+        loadPricing();
+        openEnableModal();
+      }
+    });
     if (document.getElementById("tab_sms")?.style.display === "block") {
       loadSmsSettings();
     }

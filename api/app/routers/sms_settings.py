@@ -604,6 +604,7 @@ def enable_sms(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms acceptance required")
 
     row = _ensure_sms_settings(db, user.id)
+    first_enable = row.terms_accepted_at is None
     pricing = _ensure_pricing(db)
     snapshot = payload.pricing_snapshot or _build_pricing_snapshot(pricing)
     webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
@@ -646,7 +647,7 @@ def enable_sms(
             if not row.twilio_phone_sid or not row.twilio_phone_number:
                 raise HTTPException(status_code=502, detail="Twilio did not return a provisioned phone number.")
 
-    if row.credits_balance == 0 and row.free_credits == 0:
+    if first_enable and row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
         row.free_credits = pricing.sms_starting_credits
 
