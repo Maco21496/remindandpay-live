@@ -143,21 +143,62 @@ def _fetch_subaccount_auth_token(subaccount_sid: str, master_sid: str, master_au
         return None
     return (r_sub.json() or {}).get("auth_token")
 
+def _subaccount_primary_auth(master_sid: str, master_auth_token: str, api_key_sid: str, api_key_secret: str) -> tuple[str, str]:
+    return _twilio_auth_headers(api_key_sid, api_key_secret)
+
+def _twilio_request_with_fallback(
+    method: str,
+    url: str,
+    *,
+    primary_auth: tuple[str, str],
+    fallback_auth: Optional[tuple[str, str]] = None,
+    params: Optional[dict] = None,
+    data: Optional[dict] = None,
+    timeout: int = 20,
+):
+    response = requests.request(
+        method,
+        url,
+        params=params,
+        data=data,
+        auth=primary_auth,
+        timeout=timeout,
+    )
+    if response.status_code == 401 and fallback_auth and fallback_auth != primary_auth:
+        response = requests.request(
+            method,
+            url,
+            params=params,
+            data=data,
+            auth=fallback_auth,
+            timeout=timeout,
+        )
+    return response
+
 def _twilio_friendly_name(user_email: str) -> str:
     return f"RemindPay {user_email or 'Account'}"
 
-def _find_active_subaccount_by_name(friendly_name: str, api_key_sid: str, api_key_secret: str) -> Optional[str]:
+def _find_active_subaccount_by_name(
+    friendly_name: str,
+    api_key_sid: str,
+    api_key_secret: str,
+    master_sid: str,
+    master_auth_token: str,
+) -> Optional[str]:
     list_url = "https://api.twilio.com/2010-04-01/Accounts.json"
     params = {
         "FriendlyName": friendly_name,
         "Status": "active",
         "PageSize": 20,
     }
-    r_list = requests.get(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_list = _twilio_request_with_fallback(
+        "GET",
         list_url,
         params=params,
-        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     if not r_list.ok:
         return None
@@ -169,14 +210,23 @@ def _find_active_subaccount_by_name(friendly_name: str, api_key_sid: str, api_ke
                 return sid
     return None
 
-def _is_subaccount_active(account_sid: str, api_key_sid: str, api_key_secret: str) -> bool:
+def _is_subaccount_active(
+    account_sid: str,
+    api_key_sid: str,
+    api_key_secret: str,
+    master_sid: str,
+    master_auth_token: str,
+) -> bool:
     if not account_sid:
         return False
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}.json"
-    r_account = requests.get(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_account = _twilio_request_with_fallback(
+        "GET",
         url,
-        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     if not r_account.ok:
         return False
@@ -189,6 +239,8 @@ def _find_existing_bundle_sid(
     friendly_name: str,
     api_key_sid: str,
     api_key_secret: str,
+    master_sid: str,
+    master_auth_token: str,
 ) -> Optional[str]:
     bundle_url = "https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles"
     params = {
@@ -196,11 +248,14 @@ def _find_existing_bundle_sid(
         "FriendlyName": friendly_name,
         "PageSize": 20,
     }
-    r_bundle = requests.get(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_bundle = _twilio_request_with_fallback(
+        "GET",
         bundle_url,
         params=params,
-        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     if not r_bundle.ok:
         return None
@@ -220,6 +275,8 @@ def _configure_incoming_number(
     api_key_sid: str,
     api_key_secret: str,
     bundle_sid: Optional[str],
+    master_sid: str,
+    master_auth_token: str,
 ) -> dict:
     inbound_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/inbound"
     status_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/status"
@@ -232,11 +289,14 @@ def _configure_incoming_number(
     }
     if bundle_sid:
         update_payload["BundleSid"] = bundle_sid
-    r_update = requests.post(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_update = _twilio_request_with_fallback(
+        "POST",
         update_url,
         data=update_payload,
-        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     r_update.raise_for_status()
     data = r_update.json()
@@ -252,14 +312,19 @@ def _find_existing_phone_number(
     api_key_sid: str,
     api_key_secret: str,
     bundle_sid: Optional[str],
+    master_sid: str,
+    master_auth_token: str,
 ) -> Optional[dict]:
     list_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/IncomingPhoneNumbers.json"
     params = {"PageSize": 20}
-    r_list = requests.get(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_list = _twilio_request_with_fallback(
+        "GET",
         list_url,
         params=params,
-        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     if not r_list.ok:
         return None
@@ -277,6 +342,8 @@ def _find_existing_phone_number(
             api_key_sid=api_key_sid,
             api_key_secret=api_key_secret,
             bundle_sid=bundle_sid,
+            master_sid=master_sid,
+            master_auth_token=master_auth_token,
         )
         configured["phone_number"] = configured.get("phone_number") or number.get("phone_number")
         return configured
@@ -321,6 +388,8 @@ def _provision_twilio_number(
     auth_sid: str,
     auth_secret: str,
     bundle_sid: Optional[str],
+    master_sid: str,
+    master_auth_token: str,
 ) -> dict:
     available_url = (
         f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/AvailablePhoneNumbers/"
@@ -330,12 +399,20 @@ def _provision_twilio_number(
         "SmsEnabled": "true",
         "PageSize": 1,
     }
-    r_available = requests.get(
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, auth_sid, auth_secret)
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    r_available = _twilio_request_with_fallback(
+        "GET",
         available_url,
         params=available_params,
-        auth=_twilio_auth_headers(auth_sid, auth_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
+    if r_available.status_code == 401:
+        raise HTTPException(
+            status_code=400,
+            detail="Twilio subaccount authorization failed. Set TWILIO_AUTH_TOKEN or ensure the API key can access subaccounts.",
+        )
     r_available.raise_for_status()
     data = r_available.json()
     numbers = data.get("available_phone_numbers") or []
@@ -357,11 +434,12 @@ def _provision_twilio_number(
     }
     if bundle_sid:
         purchase_payload["BundleSid"] = bundle_sid
-    r_purchase = requests.post(
+    r_purchase = _twilio_request_with_fallback(
+        "POST",
         purchase_url,
         data=purchase_payload,
-        auth=_twilio_auth_headers(auth_sid, auth_secret),
-        timeout=20,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
     )
     r_purchase.raise_for_status()
     purchase = r_purchase.json()
@@ -390,10 +468,16 @@ def _ensure_twilio_subaccount(
 
     sub_sid = (existing_subaccount_sid or "").strip()
     sub_token: Optional[str] = None
-    if sub_sid and not _is_subaccount_active(sub_sid, api_key_sid, api_key_secret):
+    if sub_sid and not _is_subaccount_active(sub_sid, api_key_sid, api_key_secret, master_sid, master_auth_token):
         sub_sid = ""
     if not sub_sid:
-        sub_sid = _find_active_subaccount_by_name(friendly_name, api_key_sid, api_key_secret) or ""
+        sub_sid = _find_active_subaccount_by_name(
+            friendly_name,
+            api_key_sid,
+            api_key_secret,
+            master_sid,
+            master_auth_token,
+        ) or ""
 
     if not sub_sid:
         create_url = "https://api.twilio.com/2010-04-01/Accounts.json"
@@ -421,6 +505,8 @@ def _ensure_twilio_subaccount(
             friendly_name=bundle_friendly_name,
             api_key_sid=api_key_sid,
             api_key_secret=api_key_secret,
+            master_sid=master_sid,
+            master_auth_token=master_auth_token,
         ) or ""
 
     if not bundle_sid:
@@ -442,6 +528,8 @@ def _ensure_twilio_subaccount(
             api_key_sid=api_key_sid,
             api_key_secret=api_key_secret,
             bundle_sid=bundle_sid,
+            master_sid=master_sid,
+            master_auth_token=master_auth_token,
         )
         provisioned["phone_number"] = provisioned.get("phone_number") or (existing_phone_number or "").strip()
     else:
@@ -451,6 +539,8 @@ def _ensure_twilio_subaccount(
             api_key_sid=api_key_sid,
             api_key_secret=api_key_secret,
             bundle_sid=bundle_sid,
+            master_sid=master_sid,
+            master_auth_token=master_auth_token,
         ) or {}
 
     if not provisioned.get("phone_sid"):
@@ -461,6 +551,8 @@ def _ensure_twilio_subaccount(
             auth_sid=api_key_sid,
             auth_secret=api_key_secret,
             bundle_sid=bundle_sid,
+            master_sid=master_sid,
+            master_auth_token=master_auth_token,
         )
 
     return {
