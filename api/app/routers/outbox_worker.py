@@ -7,9 +7,11 @@ import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+import requests
 
 from ..database import SessionLocal
 from ..models import (
+    AccountSmsSettings,
     EmailOutbox,
     ReminderEvent,
     Invoice,
@@ -107,7 +109,7 @@ def _claim_one_due_job(db: Session) -> EmailOutbox | None:
           .filter(
               EmailOutbox.status == "queued",
               EmailOutbox.next_attempt_at <= datetime.utcnow(),
-              EmailOutbox.channel == "email",
+              EmailOutbox.channel.in_(["email", "sms"]),
           )
           .order_by(EmailOutbox.id.asc())
           .with_for_update(skip_locked=True)
@@ -195,6 +197,119 @@ def _preflight_email_settings_or_fail(db: Session, job: EmailOutbox) -> bool:
     return False
 
 
+def _preflight_sms_settings_or_fail(db: Session, job: EmailOutbox) -> bool:
+    row = (
+        db.query(AccountSmsSettings)
+        .filter(AccountSmsSettings.user_id == job.user_id)
+        .first()
+    )
+    if not row or not row.enabled:
+        job.attempt_count = (job.attempt_count or 0) + 1
+        job.status = "failed"
+        job.last_error = "SMS settings not enabled for this account"
+        job.lock_owner = None
+        job.lock_acquired_at = None
+        db.commit()
+        log.error("Job %s failed: %s", job.id, job.last_error)
+        return False
+    if not row.twilio_phone_number or not row.twilio_subaccount_sid:
+        job.attempt_count = (job.attempt_count or 0) + 1
+        job.status = "failed"
+        job.last_error = "SMS settings incomplete: missing Twilio phone number or subaccount SID"
+        job.lock_owner = None
+        job.lock_acquired_at = None
+        db.commit()
+        log.error("Job %s failed: %s", job.id, job.last_error)
+        return False
+    return True
+
+
+def _twilio_auth_headers(username: str, password: str) -> tuple[str, str]:
+    return (username, password)
+
+
+def _twilio_request_with_fallback(
+    method: str,
+    url: str,
+    *,
+    primary_auth: tuple[str, str],
+    fallback_auth: tuple[str, str] | None = None,
+    data: dict | None = None,
+    timeout: int = 20,
+):
+    response = requests.request(
+        method,
+        url,
+        data=data,
+        auth=primary_auth,
+        timeout=timeout,
+    )
+    if response.status_code == 401 and fallback_auth and fallback_auth != primary_auth:
+        response = requests.request(
+            method,
+            url,
+            data=data,
+            auth=fallback_auth,
+            timeout=timeout,
+        )
+    return response
+
+
+def _send_sms_via_twilio(db: Session, job: EmailOutbox) -> str:
+    settings = (
+        db.query(AccountSmsSettings)
+        .filter(AccountSmsSettings.user_id == job.user_id)
+        .first()
+    )
+    if not settings:
+        raise RuntimeError("SMS settings missing for user")
+
+    to_number = (job.to_email or "").strip()
+    if not to_number:
+        raise RuntimeError("Missing recipient phone number")
+
+    from_number = (settings.twilio_phone_number or "").strip()
+    if not from_number:
+        raise RuntimeError("Missing Twilio sender phone number")
+
+    account_sid = (settings.twilio_subaccount_sid or "").strip()
+    if not account_sid:
+        raise RuntimeError("Missing Twilio subaccount SID")
+
+    api_key_sid = (os.getenv("TWILIO_API_KEY_SID", "") or "").strip()
+    api_key_secret = (os.getenv("TWILIO_API_KEY_SECRET", "") or "").strip()
+    if not api_key_sid or not api_key_secret:
+        raise RuntimeError("Twilio API key credentials not configured")
+
+    master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
+    master_auth_token = (os.getenv("TWILIO_AUTH_TOKEN", "") or "").strip()
+
+    primary_auth = _twilio_auth_headers(api_key_sid, api_key_secret)
+    fallback_auth = (
+        _twilio_auth_headers(master_sid, master_auth_token)
+        if master_sid and master_auth_token
+        else None
+    )
+
+    send_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    payload = {
+        "From": from_number,
+        "To": to_number,
+        "Body": job.body or "",
+    }
+    r_send = _twilio_request_with_fallback(
+        "POST",
+        send_url,
+        data=payload,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
+    )
+    if not r_send.ok:
+        raise RuntimeError(f"Twilio send failed: {r_send.status_code} {r_send.text}")
+    data = r_send.json() or {}
+    return str(data.get("sid") or "")
+
+
 def process_once() -> int:
     db: Session = SessionLocal()
 
@@ -220,7 +335,7 @@ def process_once() -> int:
     # process up to BATCH_SIZE per pass, one claim at a time
     due_cnt = db.query(EmailOutbox.id).filter(
         EmailOutbox.status == "queued",
-        EmailOutbox.channel == "email",
+        EmailOutbox.channel.in_(["email", "sms"]),
         EmailOutbox.next_attempt_at <= datetime.utcnow(),
     ).count()
     log.info("due jobs right now = %s", due_cnt)
@@ -231,7 +346,7 @@ def process_once() -> int:
                 break
             claimed_any = True
 
-            log.info("Processing job id=%s to=%s subj=%r", j.id, j.to_email, (j.subject or "")[:80])
+            log.info("Processing job id=%s channel=%s to=%s subj=%r", j.id, j.channel, j.to_email, (j.subject or "")[:80])
 
             try:
                 user = db.query(User).filter(User.id == j.user_id).first()
@@ -239,67 +354,74 @@ def process_once() -> int:
                 if not user or (j.customer_id and not cust):
                     raise RuntimeError("Missing user or customer")
 
-                # ---------- NEW: validate email settings before sending ----------
-                if not _preflight_email_settings_or_fail(db, j):
-                    # already marked failed with clear message
-                    continue
-
-                payload = _coerce_payload(j.payload_json)
-                log.info("Sending via Postmark… outbox_id=%s", j.id)
-
-                # ---- call sender
-                tmpl = (j.template or "").lower()
-                if tmpl == "statement":
-                    res = send_statement_for_user(
-                        db=db,
-                        user_id=user.id,
-                        to_email=j.to_email,
-                        subject=j.subject,
-                        message=j.body,
-                        payload_json=payload,
-                        customer_name=cust.name if cust else None,
-                    )
+                if j.channel == "sms":
+                    if not _preflight_sms_settings_or_fail(db, j):
+                        continue
+                    message_sid = _send_sms_via_twilio(db, j)
+                    if message_sid:
+                        j.provider_message_id = message_sid
                 else:
-                    # chasing (or any non-statement template)
-                    res = send_chasing_for_user(
-                        db=db,
-                        user_id=user.id,
-                        to_email=j.to_email,
-                        subject=j.subject or "",
-                        html_body=j.body or "",
-                    )
-
-                if not res.ok:
-                    # If permanent, fail immediately (no retry)
-                    if getattr(res, "permanent", False):
-                        j.attempt_count = (j.attempt_count or 0) + 1
-                        j.status = "failed"
-                        j.last_error = (getattr(res, "error", "") or "")[:2000]
-                        j.lock_owner = None
-                        j.lock_acquired_at = None
-                        if j.run_id:
-                            run = db.query(StatementRun).get(j.run_id)
-                            if run:
-                                if run.run_started_at is None:
-                                    run.run_started_at = datetime.utcnow()
-                                    run.status = "processing"
-                                run.jobs_failed = (run.jobs_failed or 0) + 1
-                                _maybe_mark_run_done(db, run)
-                        db.commit()
-                        log.warning("Job %s marked failed permanently (code=%s): %s",
-                                    j.id, getattr(res, "code", None), getattr(res, "error", None))
+                    # ---------- NEW: validate email settings before sending ----------
+                    if not _preflight_email_settings_or_fail(db, j):
+                        # already marked failed with clear message
                         continue
 
-                    # transient error → let the generic retry path handle it via except
-                    raise RuntimeError(getattr(res, "error", None) or "Mail send failed")
+                    payload = _coerce_payload(j.payload_json)
+                    log.info("Sending via Postmark… outbox_id=%s", j.id)
 
-                # ---- success — provider accepted
-                if (j.template or "").lower() == "statement":
-                    _log_statement_events(db, j.user_id, j.customer_id)
+                    # ---- call sender
+                    tmpl = (j.template or "").lower()
+                    if tmpl == "statement":
+                        res = send_statement_for_user(
+                            db=db,
+                            user_id=user.id,
+                            to_email=j.to_email,
+                            subject=j.subject,
+                            message=j.body,
+                            payload_json=payload,
+                            customer_name=cust.name if cust else None,
+                        )
+                    else:
+                        # chasing (or any non-statement template)
+                        res = send_chasing_for_user(
+                            db=db,
+                            user_id=user.id,
+                            to_email=j.to_email,
+                            subject=j.subject or "",
+                            html_body=j.body or "",
+                        )
 
-                j.provider = "postmark"
-                if res.message_id:
-                    j.provider_message_id = str(res.message_id)
+                    if not res.ok:
+                        # If permanent, fail immediately (no retry)
+                        if getattr(res, "permanent", False):
+                            j.attempt_count = (j.attempt_count or 0) + 1
+                            j.status = "failed"
+                            j.last_error = (getattr(res, "error", "") or "")[:2000]
+                            j.lock_owner = None
+                            j.lock_acquired_at = None
+                            if j.run_id:
+                                run = db.query(StatementRun).get(j.run_id)
+                                if run:
+                                    if run.run_started_at is None:
+                                        run.run_started_at = datetime.utcnow()
+                                        run.status = "processing"
+                                    run.jobs_failed = (run.jobs_failed or 0) + 1
+                                    _maybe_mark_run_done(db, run)
+                            db.commit()
+                            log.warning("Job %s marked failed permanently (code=%s): %s",
+                                        j.id, getattr(res, "code", None), getattr(res, "error", None))
+                            continue
+
+                        # transient error → let the generic retry path handle it via except
+                        raise RuntimeError(getattr(res, "error", None) or "Mail send failed")
+
+                    # ---- success — provider accepted
+                    if (j.template or "").lower() == "statement":
+                        _log_statement_events(db, j.user_id, j.customer_id)
+
+                    j.provider = "postmark"
+                    if res.message_id:
+                        j.provider_message_id = str(res.message_id)
 
                 j.status = "sent"
                 j.delivery_status = "sent"
