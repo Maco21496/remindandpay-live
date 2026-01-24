@@ -1,4 +1,3 @@
-# FINAL VERSION OF sms_settings.py
 # api/app/routers/sms_settings.py
 from datetime import datetime
 import os
@@ -15,9 +14,7 @@ from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
 from ..crypto_secrets import encrypt_secret
 from .auth import require_user
-
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
-
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
@@ -31,7 +28,6 @@ class SmsSettingsOut(BaseModel):
     terms_accepted_at: Optional[datetime] = None
     terms_version: Optional[str] = None
 
-
 class SmsSettingsIn(BaseModel):
     enabled: Optional[bool] = None
     twilio_phone_number: Optional[str] = None
@@ -42,13 +38,11 @@ class SmsSettingsIn(BaseModel):
     credits_balance: Optional[int] = Field(None, ge=0)
     free_credits: Optional[int] = Field(None, ge=0)
 
-
 class SmsTermsIn(BaseModel):
     accepted: bool
     terms_version: Optional[str] = None
     pricing_snapshot: Optional[dict] = None
     country: Optional[str] = None
-
 
 class PricingOut(BaseModel):
     sms_starting_credits: int
@@ -71,7 +65,6 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     db.commit()
     db.refresh(row)
     return row
-
 
 def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
     has_entries = (
@@ -100,7 +93,6 @@ def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
     )
     return True, int(total or 0)
 
-
 def _ensure_pricing(db: Session) -> SmsPricingSettings:
     row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
     if row:
@@ -117,7 +109,6 @@ def _ensure_pricing(db: Session) -> SmsPricingSettings:
     db.refresh(row)
     return row
 
-
 def _build_pricing_snapshot(row: SmsPricingSettings) -> dict:
     return {
         "sms_starting_credits": row.sms_starting_credits,
@@ -127,13 +118,9 @@ def _build_pricing_snapshot(row: SmsPricingSettings) -> dict:
         "sms_suspend_after_days": row.sms_suspend_after_days,
     }
 
-
 def _twilio_auth_headers(username: str, password: str) -> tuple[str, str]:
     return (username, password)
 
-
-# FINAL VERSION OF _provision_twilio_number()
-# FINAL VERSION OF _provision_twilio_number()
 def _provision_twilio_number(
     *,
     country: str,
@@ -141,6 +128,7 @@ def _provision_twilio_number(
     account_sid: str,
     auth_sid: str,
     auth_secret: str,
+    bundle_sid: Optional[str],
 ) -> dict:
     available_url = (
         f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/AvailablePhoneNumbers/"
@@ -156,12 +144,7 @@ def _provision_twilio_number(
         auth=_twilio_auth_headers(auth_sid, auth_secret),
         timeout=20,
     )
-    if not r_available.ok:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Twilio available-number lookup failed: {r_available.status_code} {r_available.text}",
-        )
-
+    r_available.raise_for_status()
     data = r_available.json()
     numbers = data.get("available_phone_numbers") or []
     if not numbers:
@@ -180,47 +163,42 @@ def _provision_twilio_number(
         "StatusCallback": status_url,
         "StatusCallbackMethod": "POST",
     }
+    if bundle_sid:
+        purchase_payload["BundleSid"] = bundle_sid
     r_purchase = requests.post(
         purchase_url,
         data=purchase_payload,
         auth=_twilio_auth_headers(auth_sid, auth_secret),
         timeout=20,
     )
-    if not r_purchase.ok:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Twilio number purchase failed: {r_purchase.status_code} {r_purchase.text}",
-        )
-
+    r_purchase.raise_for_status()
     purchase = r_purchase.json()
     return {
         "phone_number": purchase.get("phone_number") or phone_number,
         "phone_sid": purchase.get("sid"),
     }
 
-
 def _ensure_twilio_subaccount(
     *,
     user_email: str,
     webhook_base: str,
     country: str,
+    parent_bundle_sid: str,
 ) -> dict:
-    # Parent (master) credentials for creating subaccounts
     master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
-    master_auth_token = (os.getenv("TWILIO_AUTH_TOKEN", "") or "").strip()
-
-    if not master_sid or not master_auth_token:
-        raise HTTPException(
-            status_code=400,
-            detail="Twilio parent credentials not configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN).",
-        )
+    api_key_sid = (os.getenv("TWILIO_API_KEY_SID", "") or "").strip()
+    api_key_secret = (os.getenv("TWILIO_API_KEY_SECRET", "") or "").strip()
+    if not master_sid or not api_key_sid or not api_key_secret:
+        raise HTTPException(status_code=400, detail="Twilio API key credentials not configured.")
+    if not parent_bundle_sid:
+        raise HTTPException(status_code=400, detail="TWILIO_PARENT_BUNDLE_SID is not configured.")
 
     create_url = "https://api.twilio.com/2010-04-01/Accounts.json"
     payload = {"FriendlyName": f"RemindPay {user_email or 'Account'}"}
     r_create = requests.post(
         create_url,
         data=payload,
-        auth=_twilio_auth_headers(master_sid, master_auth_token),
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
         timeout=20,
     )
     r_create.raise_for_status()
@@ -230,22 +208,44 @@ def _ensure_twilio_subaccount(
     if not sub_sid or not sub_token:
         raise HTTPException(status_code=502, detail="Twilio did not return subaccount credentials.")
 
-    # Subaccount credentials for provisioning resources inside the subaccount
+    clone_url = f"https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles/{parent_bundle_sid}/Clones"
+    clone_payload = {
+        "targetAccountSid": sub_sid,
+        "friendlyName": f"RemindPay {user_email or 'Account'} bundle",
+        "moveToDraft": "false",
+    }
+    r_clone = requests.post(
+        clone_url,
+        data=clone_payload,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    if not r_clone.ok:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Twilio bundle clone failed: {r_clone.status_code} {r_clone.text}",
+        )
+    clone_data = r_clone.json()
+    bundle_sid = clone_data.get("bundle_sid") or clone_data.get("bundleSid")
+    if not bundle_sid:
+        raise HTTPException(status_code=502, detail="Twilio bundle clone did not return BundleSid.")
+
     provisioned = _provision_twilio_number(
         country=country,
         webhook_base=webhook_base,
         account_sid=sub_sid,
-        auth_sid=sub_sid,
-        auth_secret=sub_token,
+        auth_sid=api_key_sid,
+        auth_secret=api_key_secret,
+        bundle_sid=bundle_sid,
     )
 
     return {
         "subaccount_sid": sub_sid,
         "auth_token": sub_token,
+        "bundle_sid": bundle_sid,
         "phone_number": provisioned.get("phone_number"),
         "phone_sid": provisioned.get("phone_sid"),
     }
-
 
 @router.get("/pricing", response_model=PricingOut)
 def get_pricing(
@@ -255,11 +255,10 @@ def get_pricing(
     row = _ensure_pricing(db)
     return PricingOut(**_build_pricing_snapshot(row))
 
-
 @router.get("/settings", response_model=SmsSettingsOut)
 def get_sms_settings(
     db: Session = Depends(get_db),
-    user=Depends(require_user),
+    user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
     has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
@@ -277,7 +276,6 @@ def get_sms_settings(
         terms_accepted_at=row.terms_accepted_at,
         terms_version=row.terms_version,
     )
-
 
 @router.post("/enable", response_model=SmsSettingsOut)
 def enable_sms(
@@ -303,14 +301,18 @@ def enable_sms(
     row.terms_accepted_ip = request.client.host if request.client else None
     row.accepted_pricing_snapshot = snapshot
 
-    if not row.twilio_subaccount_sid or not row.twilio_auth_token_enc:
+    parent_bundle_sid = (os.getenv("TWILIO_PARENT_BUNDLE_SID", "") or "").strip()
+
+    if not row.twilio_subaccount_sid or not row.twilio_auth_token_enc or not row.twilio_bundle_sid:
         provisioned = _ensure_twilio_subaccount(
             user_email=user.email or "",
             webhook_base=webhook_base,
             country=country,
+            parent_bundle_sid=parent_bundle_sid,
         )
         row.twilio_subaccount_sid = provisioned["subaccount_sid"]
         row.twilio_auth_token_enc = encrypt_secret(provisioned["auth_token"])
+        row.twilio_bundle_sid = provisioned.get("bundle_sid")
         row.twilio_phone_number = provisioned.get("phone_number")
         row.twilio_phone_sid = provisioned.get("phone_sid")
 
@@ -338,12 +340,11 @@ def enable_sms(
         terms_version=row.terms_version,
     )
 
-
 @router.post("/settings", response_model=SmsSettingsOut)
 def update_sms_settings(
     payload: SmsSettingsIn,
     db: Session = Depends(get_db),
-    user=Depends(require_user),
+    user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
 
