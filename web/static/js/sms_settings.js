@@ -64,7 +64,7 @@
       isEnabled ? `SMS balance ${label}` : "Enable SMS"
     );
     balanceChip.title = isEnabled ? "Open SMS activity" : "Enable SMS";
-    balanceChip.href = isEnabled ? "/schedule" : "#tab_sms";
+    balanceChip.href = isEnabled ? "/schedule#sms-activity" : "#tab_sms";
     balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
   }
 
