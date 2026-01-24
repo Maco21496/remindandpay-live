@@ -52,6 +52,11 @@
   // -----------------------
   // Tabs
   // -----------------------
+  function activateTab(tabName) {
+    const btn = q(`.tab[data-tab="${tabName}"]`);
+    btn?.click();
+  }
+
   qa(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       qa(".tab").forEach((b) => b.classList.remove("active"));
@@ -1829,6 +1834,9 @@ document.addEventListener("click", (e) => {
   // init on DOM ready
   // -----------------------
   document.addEventListener("DOMContentLoaded", async () => {
+    if (window.location.hash === "#sms-activity") {
+      activateTab("sms-activity");
+    }
     await loadGlobals();
     await loadChasingGlobals();
 
