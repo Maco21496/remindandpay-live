@@ -58,13 +58,13 @@
   function updateBalanceChip(isEnabled, balance) {
     if (!balanceChip) return;
     const label = isEnabled ? String(balance ?? 0) : "Enable";
-    balanceChip.textContent = `SMS balance: ${label}`;
+    balanceChip.textContent = `SMS credits: ${label}`;
     balanceChip.setAttribute(
       "aria-label",
-      isEnabled ? `SMS balance ${label}` : "Enable SMS"
+      isEnabled ? `SMS credits ${label}` : "Enable SMS"
     );
     balanceChip.title = isEnabled ? "Open SMS activity" : "Enable SMS";
-    balanceChip.href = isEnabled ? "/schedule#sms-activity" : "#tab_sms";
+    balanceChip.href = isEnabled ? "/schedule#sms-activity" : "/settings#sms";
     balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
   }
 
@@ -112,7 +112,7 @@
     }
   }
 
-  async function loadSmsSettings() {
+  async function loadSmsSettings({ silent = false } = {}) {
     try {
       const r = await fetch("/api/sms/settings", { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
@@ -133,7 +133,7 @@
       updateBalanceChip(currentEnabled, data.credits_balance);
       if (msg) msg.textContent = "";
     } catch {
-      if (msg) msg.textContent = "Failed to load SMS settings.";
+      if (msg && !silent) msg.textContent = "Failed to load SMS settings.";
     }
   }
 
@@ -245,6 +245,7 @@
         openEnableModal();
       }
     });
+    loadSmsSettings({ silent: true });
     if (document.getElementById("tab_sms")?.style.display === "block") {
       loadSmsSettings();
     }

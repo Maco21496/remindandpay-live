@@ -358,6 +358,16 @@
     // default
     showOnly('app');
 
+    if (window.location.hash === '#sms') {
+      const smsTab = tabs.querySelector('.tab[data-tab="sms"]');
+      if (smsTab) {
+        tabs.querySelectorAll('.tab').forEach(t=>t.classList.remove('is-active'));
+        smsTab.classList.add('is-active');
+        showOnly('sms');
+        window.dispatchEvent(new Event('sms_settings_tab_activated'));
+      }
+    }
+
     tabs.addEventListener('click', (e)=>{
       const btn = e.target.closest('.tab');
       if (!btn) return;
