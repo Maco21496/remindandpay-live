@@ -41,6 +41,67 @@ class AppSettings(Base):
 
     user = relationship("User")
 
+class AccountSmsSettings(Base):
+    __tablename__ = "account_sms_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+
+    enabled = Column(Boolean, nullable=False, default=False)
+    chasing_delivery_mode = Column(String(10), nullable=False, default="email")  # email|sms|both
+
+    twilio_phone_number = Column(String(30), nullable=True)
+    twilio_phone_sid = Column(String(64), nullable=True)
+    twilio_subaccount_sid = Column(String(64), nullable=True)
+    twilio_auth_token_enc = Column(String(255), nullable=True)
+    twilio_bundle_sid = Column(String(64), nullable=True)
+
+    forwarding_enabled = Column(Boolean, nullable=False, default=False)
+    forward_to_phone = Column(String(30), nullable=True)
+
+    bundle_size = Column(Integer, nullable=False, default=1000)
+    credits_balance = Column(Integer, nullable=False, default=0)
+    free_credits = Column(Integer, nullable=False, default=0)
+
+    terms_accepted_at = Column(DateTime, nullable=True)
+    terms_version = Column(String(32), nullable=True)
+    terms_accepted_ip = Column(String(64), nullable=True)
+    accepted_pricing_snapshot = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
+class SmsPricingSettings(Base):
+    __tablename__ = "sms_pricing_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sms_starting_credits = Column(Integer, nullable=False, default=1000)
+    sms_monthly_number_cost = Column(Integer, nullable=False, default=100)
+    sms_send_cost = Column(Integer, nullable=False, default=5)
+    sms_forward_cost = Column(Integer, nullable=False, default=5)
+    sms_suspend_after_days = Column(Integer, nullable=False, default=14)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class SmsCreditLedger(Base):
+    __tablename__ = "sms_credit_ledger"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    entry_type = Column(Enum("credit", "debit", name="sms_ledger_entry_type"), nullable=False)
+    amount = Column(Integer, nullable=False)
+    reason = Column(String(120), nullable=False)
+    reference_id = Column(String(64), nullable=True)
+    details = Column("metadata", JSON, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
+
 class Customer(Base):
     __tablename__ = "customers"
 
