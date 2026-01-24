@@ -143,6 +143,145 @@ def _fetch_subaccount_auth_token(subaccount_sid: str, master_sid: str, master_au
         return None
     return (r_sub.json() or {}).get("auth_token")
 
+def _twilio_friendly_name(user_email: str) -> str:
+    return f"RemindPay {user_email or 'Account'}"
+
+def _find_active_subaccount_by_name(friendly_name: str, api_key_sid: str, api_key_secret: str) -> Optional[str]:
+    list_url = "https://api.twilio.com/2010-04-01/Accounts.json"
+    params = {
+        "FriendlyName": friendly_name,
+        "Status": "active",
+        "PageSize": 20,
+    }
+    r_list = requests.get(
+        list_url,
+        params=params,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    if not r_list.ok:
+        return None
+    accounts = (r_list.json() or {}).get("accounts") or []
+    for account in accounts:
+        if (account.get("friendly_name") or "") == friendly_name and (account.get("status") or "").lower() == "active":
+            sid = (account.get("sid") or "").strip()
+            if sid:
+                return sid
+    return None
+
+def _is_subaccount_active(account_sid: str, api_key_sid: str, api_key_secret: str) -> bool:
+    if not account_sid:
+        return False
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}.json"
+    r_account = requests.get(
+        url,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    if not r_account.ok:
+        return False
+    status_value = ((r_account.json() or {}).get("status") or "").lower()
+    return status_value == "active"
+
+def _find_existing_bundle_sid(
+    *,
+    account_sid: str,
+    friendly_name: str,
+    api_key_sid: str,
+    api_key_secret: str,
+) -> Optional[str]:
+    bundle_url = "https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles"
+    params = {
+        "AccountSid": account_sid,
+        "FriendlyName": friendly_name,
+        "PageSize": 20,
+    }
+    r_bundle = requests.get(
+        bundle_url,
+        params=params,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    if not r_bundle.ok:
+        return None
+    bundles = (r_bundle.json() or {}).get("bundles") or []
+    for bundle in bundles:
+        sid = (bundle.get("sid") or bundle.get("bundle_sid") or bundle.get("bundleSid") or "").strip()
+        status_value = (bundle.get("status") or "").lower()
+        if sid and status_value not in {"rejected", "draft"}:
+            return sid
+    return None
+
+def _configure_incoming_number(
+    *,
+    account_sid: str,
+    phone_sid: str,
+    webhook_base: str,
+    api_key_sid: str,
+    api_key_secret: str,
+    bundle_sid: Optional[str],
+) -> dict:
+    inbound_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/inbound"
+    status_url = f"{webhook_base.rstrip('/')}/api/sms/webhooks/status"
+    update_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/IncomingPhoneNumbers/{phone_sid}.json"
+    update_payload = {
+        "SmsUrl": inbound_url,
+        "SmsMethod": "POST",
+        "StatusCallback": status_url,
+        "StatusCallbackMethod": "POST",
+    }
+    if bundle_sid:
+        update_payload["BundleSid"] = bundle_sid
+    r_update = requests.post(
+        update_url,
+        data=update_payload,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    r_update.raise_for_status()
+    data = r_update.json()
+    return {
+        "phone_number": data.get("phone_number"),
+        "phone_sid": data.get("sid") or phone_sid,
+    }
+
+def _find_existing_phone_number(
+    *,
+    account_sid: str,
+    webhook_base: str,
+    api_key_sid: str,
+    api_key_secret: str,
+    bundle_sid: Optional[str],
+) -> Optional[dict]:
+    list_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/IncomingPhoneNumbers.json"
+    params = {"PageSize": 20}
+    r_list = requests.get(
+        list_url,
+        params=params,
+        auth=_twilio_auth_headers(api_key_sid, api_key_secret),
+        timeout=20,
+    )
+    if not r_list.ok:
+        return None
+    numbers = (r_list.json() or {}).get("incoming_phone_numbers") or []
+    for number in numbers:
+        if not number.get("sms_enabled"):
+            continue
+        sid = (number.get("sid") or "").strip()
+        if not sid:
+            continue
+        configured = _configure_incoming_number(
+            account_sid=account_sid,
+            phone_sid=sid,
+            webhook_base=webhook_base,
+            api_key_sid=api_key_sid,
+            api_key_secret=api_key_secret,
+            bundle_sid=bundle_sid,
+        )
+        configured["phone_number"] = configured.get("phone_number") or number.get("phone_number")
+        return configured
+    return None
+
 def _clone_twilio_bundle(
     *,
     parent_bundle_sid: str,
@@ -153,9 +292,9 @@ def _clone_twilio_bundle(
 ) -> str:
     clone_url = f"https://numbers.twilio.com/v2/RegulatoryCompliance/Bundles/{parent_bundle_sid}/Clones"
     clone_payload = {
-        "targetAccountSid": target_account_sid,
-        "friendlyName": friendly_name,
-        "moveToDraft": "false",
+        "TargetAccountSid": target_account_sid,
+        "FriendlyName": friendly_name,
+        "MoveToDraft": "false",
     }
     r_clone = requests.post(
         clone_url,
@@ -240,16 +379,25 @@ def _ensure_twilio_subaccount(
     existing_subaccount_sid: Optional[str] = None,
     existing_bundle_sid: Optional[str] = None,
     existing_phone_sid: Optional[str] = None,
+    existing_phone_number: Optional[str] = None,
 ) -> dict:
     master_sid, api_key_sid, api_key_secret, master_auth_token = _twilio_credentials()
     if not parent_bundle_sid:
         raise HTTPException(status_code=400, detail="TWILIO_PARENT_BUNDLE_SID is not configured.")
 
+    friendly_name = _twilio_friendly_name(user_email)
+    bundle_friendly_name = f"{friendly_name} bundle"
+
     sub_sid = (existing_subaccount_sid or "").strip()
     sub_token: Optional[str] = None
+    if sub_sid and not _is_subaccount_active(sub_sid, api_key_sid, api_key_secret):
+        sub_sid = ""
+    if not sub_sid:
+        sub_sid = _find_active_subaccount_by_name(friendly_name, api_key_sid, api_key_secret) or ""
+
     if not sub_sid:
         create_url = "https://api.twilio.com/2010-04-01/Accounts.json"
-        payload = {"FriendlyName": f"RemindPay {user_email or 'Account'}"}
+        payload = {"FriendlyName": friendly_name}
         r_create = requests.post(
             create_url,
             data=payload,
@@ -268,16 +416,44 @@ def _ensure_twilio_subaccount(
 
     bundle_sid = (existing_bundle_sid or "").strip()
     if not bundle_sid:
+        bundle_sid = _find_existing_bundle_sid(
+            account_sid=sub_sid,
+            friendly_name=bundle_friendly_name,
+            api_key_sid=api_key_sid,
+            api_key_secret=api_key_secret,
+        ) or ""
+
+    if not bundle_sid:
         bundle_sid = _clone_twilio_bundle(
             parent_bundle_sid=parent_bundle_sid,
             target_account_sid=sub_sid,
             api_key_sid=api_key_sid,
             api_key_secret=api_key_secret,
-            friendly_name=f"RemindPay {user_email or 'Account'} bundle",
+            friendly_name=bundle_friendly_name,
         )
 
     provisioned: dict = {}
-    if not existing_phone_sid:
+    has_existing_phone = bool((existing_phone_sid or "").strip() and (existing_phone_number or "").strip())
+    if has_existing_phone:
+        provisioned = _configure_incoming_number(
+            account_sid=sub_sid,
+            phone_sid=(existing_phone_sid or "").strip(),
+            webhook_base=webhook_base,
+            api_key_sid=api_key_sid,
+            api_key_secret=api_key_secret,
+            bundle_sid=bundle_sid,
+        )
+        provisioned["phone_number"] = provisioned.get("phone_number") or (existing_phone_number or "").strip()
+    else:
+        provisioned = _find_existing_phone_number(
+            account_sid=sub_sid,
+            webhook_base=webhook_base,
+            api_key_sid=api_key_sid,
+            api_key_secret=api_key_secret,
+            bundle_sid=bundle_sid,
+        ) or {}
+
+    if not provisioned.get("phone_sid"):
         provisioned = _provision_twilio_number(
             country=country,
             webhook_base=webhook_base,
@@ -364,6 +540,7 @@ def enable_sms(
             existing_subaccount_sid=row.twilio_subaccount_sid,
             existing_bundle_sid=row.twilio_bundle_sid,
             existing_phone_sid=row.twilio_phone_sid if row.twilio_phone_sid and row.twilio_phone_number else None,
+            existing_phone_number=row.twilio_phone_number if row.twilio_phone_sid and row.twilio_phone_number else None,
         )
         if needs_subaccount:
             row.twilio_subaccount_sid = provisioned["subaccount_sid"]
@@ -374,6 +551,8 @@ def enable_sms(
         if needs_phone:
             row.twilio_phone_number = provisioned.get("phone_number") or row.twilio_phone_number
             row.twilio_phone_sid = provisioned.get("phone_sid") or row.twilio_phone_sid
+            if not row.twilio_phone_sid or not row.twilio_phone_number:
+                raise HTTPException(status_code=502, detail="Twilio did not return a provisioned phone number.")
 
     if row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
