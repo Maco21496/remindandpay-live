@@ -222,6 +222,18 @@ def _load_template(db: Session, user_id: int, key: str, channel: str = "email") 
           .first()
     )
 
+def _html_to_text_fallback(html: str) -> str:
+    import re
+
+    s = html or ""
+    s = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*p\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*div\s*>", "\n", s)
+    s = re.sub(r"(?i)</\s*li\s*>", "\n", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s or " "
+
 # simple dedupe: don’t enqueue same (customer, template_key) recently
 def _sent_recently(
     db: Session,
@@ -253,7 +265,10 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     )
     if row:
         return row
-    row = AccountSmsSettings(user_id=user_id)
+    row = AccountSmsSettings(
+        user_id=user_id,
+        chasing_delivery_mode="email",
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -609,10 +624,14 @@ def send_now(
                         continue
 
                 trigger = _choose_step(db, seq_id, days, channel=channel)
+                template_channel = channel
+                if not trigger and channel == "sms":
+                    trigger = _choose_step(db, seq_id, days, channel="email")
+                    template_channel = "email"
                 if not trigger:
                     continue
 
-                tpl = _load_template(db, user.id, trigger.template_key, trigger.channel)
+                tpl = _load_template(db, user.id, trigger.template_key, template_channel)
                 if not tpl:
                     continue
 
@@ -644,7 +663,10 @@ def send_now(
                 subj      = _render_tokens(subj_raw,      ctx)
                 body_html = _render_tokens(body_html_raw, ctx)
                 body_text = _render_tokens(body_text_raw, ctx)
-                body      = body_text if channel == "sms" else (body_html or body_text)
+                if channel == "sms":
+                    body = body_text or _html_to_text_fallback(body_html)
+                else:
+                    body = body_html or body_text
                 if not body:
                     continue
 
@@ -798,10 +820,14 @@ def enqueue_due(db: Session = Depends(get_db)):
                                 continue
 
                         trigger = _choose_step(db, seq_id, days, channel=channel)
+                        template_channel = channel
+                        if not trigger and channel == "sms":
+                            trigger = _choose_step(db, seq_id, days, channel="email")
+                            template_channel = "email"
                         if not trigger:
                             continue
 
-                        tpl = _load_template(db, user_id, trigger.template_key, trigger.channel)
+                        tpl = _load_template(db, user_id, trigger.template_key, template_channel)
                         if not tpl:
                             continue
 
@@ -833,7 +859,10 @@ def enqueue_due(db: Session = Depends(get_db)):
                         subj      = _render_tokens(subj_raw,      ctx)
                         body_html = _render_tokens(body_html_raw, ctx)
                         body_text = _render_tokens(body_text_raw, ctx)
-                        body      = body_text if channel == "sms" else (body_html or body_text)
+                        if channel == "sms":
+                            body = body_text or _html_to_text_fallback(body_html)
+                        else:
+                            body = body_html or body_text
                         if not body:
                             continue
 
