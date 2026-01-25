@@ -56,7 +56,7 @@ def _log_statement_events(db: Session, user_id: int, customer_id: int):
           )
           .all()
     )
-    now = datetime.utcnow()
+    now = _db_utcnow(db)
     for inv in invs:
         db.add(ReminderEvent(
             invoice_id=inv.id,
@@ -77,7 +77,7 @@ def _maybe_mark_run_done(db: Session, run: StatementRun):
         done = (run.jobs_succeeded or 0) + (run.jobs_failed or 0)
         if done >= (run.jobs_enqueued or 0):
             run.status = "done"
-            run.run_finished_at = datetime.utcnow()
+            run.run_finished_at = _db_utcnow(db)
 
 
 def _requeue_stale_processing(db: Session, stale_seconds: int = 120) -> int:
@@ -100,15 +100,20 @@ def _requeue_stale_processing(db: Session, stale_seconds: int = 120) -> int:
     return res.rowcount or 0
 
 
+def _db_utcnow(db: Session) -> datetime:
+    return db.execute(text("SELECT UTC_TIMESTAMP()")).scalar()
+
+
 def _claim_one_due_job(db: Session) -> EmailOutbox | None:
     """
     Claim exactly one due job (SKIP LOCKED) and mark it processing.
     """
+    db_now = _db_utcnow(db)
     jobs = (
         db.query(EmailOutbox)
           .filter(
               EmailOutbox.status == "queued",
-              EmailOutbox.next_attempt_at <= datetime.utcnow(),
+              EmailOutbox.next_attempt_at <= db_now,
               EmailOutbox.channel.in_(["email", "sms"]),
           )
           .order_by(EmailOutbox.id.asc())
@@ -126,7 +131,7 @@ def _claim_one_due_job(db: Session) -> EmailOutbox | None:
 
     j.status = "processing"
     j.lock_owner = WORKER_NAME
-    j.lock_acquired_at = datetime.utcnow()
+    j.lock_acquired_at = db_now
     db.commit()
     return j
 
@@ -333,10 +338,11 @@ def process_once() -> int:
     claimed_any = False
 
     # process up to BATCH_SIZE per pass, one claim at a time
+    db_now = _db_utcnow(db)
     due_cnt = db.query(EmailOutbox.id).filter(
         EmailOutbox.status == "queued",
         EmailOutbox.channel.in_(["email", "sms"]),
-        EmailOutbox.next_attempt_at <= datetime.utcnow(),
+        EmailOutbox.next_attempt_at <= db_now,
     ).count()
     log.info("due jobs right now = %s", due_cnt)
     for _ in range(BATCH_SIZE):
@@ -403,7 +409,7 @@ def process_once() -> int:
                                 run = db.query(StatementRun).get(j.run_id)
                                 if run:
                                     if run.run_started_at is None:
-                                        run.run_started_at = datetime.utcnow()
+                                        run.run_started_at = _db_utcnow(db)
                                         run.status = "processing"
                                     run.jobs_failed = (run.jobs_failed or 0) + 1
                                     _maybe_mark_run_done(db, run)
@@ -425,7 +431,7 @@ def process_once() -> int:
 
                 j.status = "sent"
                 j.delivery_status = "sent"
-                j.updated_at = datetime.utcnow()
+                j.updated_at = _db_utcnow(db)
                 j.lock_owner = None
                 j.lock_acquired_at = None
                 sent_count += 1
@@ -434,7 +440,7 @@ def process_once() -> int:
                     run = db.query(StatementRun).filter(StatementRun.id == j.run_id).first()
                     if run:
                         if run.run_started_at is None:
-                            run.run_started_at = datetime.utcnow()
+                            run.run_started_at = _db_utcnow(db)
                             run.status = "processing"
                         run.jobs_succeeded = (run.jobs_succeeded or 0) + 1
                         _maybe_mark_run_done(db, run)
@@ -466,7 +472,7 @@ def process_once() -> int:
                 else:
                     backoff_min = _next_backoff_minutes(j.attempt_count)
                     j.status = "queued"
-                    j.next_attempt_at = datetime.utcnow() + timedelta(minutes=backoff_min)
+                    j.next_attempt_at = _db_utcnow(db) + timedelta(minutes=backoff_min)
                     j.lock_owner = None
                     j.lock_acquired_at = None
                     log.warning("Job %s requeued with backoff=%d min (attempt %d)", j.id, backoff_min, j.attempt_count)
