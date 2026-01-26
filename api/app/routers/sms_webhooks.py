@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..crypto_secrets import decrypt_secret
 from ..database import get_db
-from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings
+from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings, SmsWebhookLog
 
 router = APIRouter(prefix="/api/sms/webhooks", tags=["sms-webhooks"])
 
@@ -174,10 +174,24 @@ def _record_sms_debit(
     db.commit()
 
 
+def _log_sms_webhook(db: Session, kind: str, params: dict) -> None:
+    if (os.getenv("TWILIO_LOG_WEBHOOKS", "") or "").strip().lower() not in {"1", "true", "yes"}:
+        return
+    record = SmsWebhookLog(
+        kind=kind,
+        account_sid=(params.get("AccountSid") or "").strip() or None,
+        message_sid=(params.get("MessageSid") or "").strip() or None,
+        payload=params,
+    )
+    db.add(record)
+    db.commit()
+
+
 @router.post("/inbound")
 async def inbound_sms(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     params = _normalize_params(dict(form))
+    _log_sms_webhook(db, "inbound", params)
     account_sid = params.get("AccountSid")
     to_number = params.get("To")
 
@@ -196,6 +210,7 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
 async def sms_status(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     params = _normalize_params(dict(form))
+    _log_sms_webhook(db, "status", params)
     account_sid = params.get("AccountSid")
     to_number = params.get("To")
 
