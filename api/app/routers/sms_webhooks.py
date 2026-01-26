@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..crypto_secrets import decrypt_secret
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
+from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings
 
 router = APIRouter(prefix="/api/sms/webhooks", tags=["sms-webhooks"])
 
@@ -86,6 +86,16 @@ def _update_outbox_status(db: Session, message_sid: str, status_value: str, payl
     db.commit()
 
 
+def _lookup_outbox_by_sid(db: Session, message_sid: str) -> Optional[EmailOutbox]:
+    if not message_sid:
+        return None
+    return (
+        db.query(EmailOutbox)
+        .filter(EmailOutbox.provider_message_id == message_sid)
+        .first()
+    )
+
+
 def _ensure_pricing(db: Session) -> SmsPricingSettings:
     row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
     if row:
@@ -108,10 +118,11 @@ def _record_sms_debit(
     settings: Optional[AccountSmsSettings],
     params: dict,
 ) -> None:
-    if not settings:
-        return
     message_sid = (params.get("MessageSid") or "").strip()
     if not message_sid:
+        return
+    outbox = _lookup_outbox_by_sid(db, message_sid)
+    if not settings and not outbox:
         return
     status = (params.get("MessageStatus") or "").lower()
     if status not in {"sent", "delivered"}:
@@ -119,7 +130,7 @@ def _record_sms_debit(
     existing = (
         db.query(SmsCreditLedger.id)
         .filter(
-            SmsCreditLedger.user_id == settings.user_id,
+            SmsCreditLedger.user_id == (settings.user_id if settings else outbox.user_id),
             SmsCreditLedger.entry_type == "debit",
             SmsCreditLedger.reference_id == message_sid,
         )
@@ -139,19 +150,24 @@ def _record_sms_debit(
     if total_credits <= 0:
         return
 
+    user_id = settings.user_id if settings else outbox.user_id
+    to_number = params.get("To") or (outbox.to_email if outbox else None)
+    from_number = params.get("From")
     entry = SmsCreditLedger(
-        user_id=settings.user_id,
+        user_id=user_id,
         entry_type="debit",
         amount=total_credits,
         reason="sms_send",
         reference_id=message_sid,
         details={
             "message_sid": message_sid,
-            "to": params.get("To"),
-            "from": params.get("From"),
+            "to": to_number,
+            "from": from_number,
             "segments": num_segments,
             "status": status,
             "credits_per_segment": credits_per_segment,
+            "outbox_id": outbox.id if outbox else None,
+            "customer_id": outbox.customer_id if outbox else None,
         },
     )
     db.add(entry)
