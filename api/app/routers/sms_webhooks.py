@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..crypto_secrets import decrypt_secret
 from ..database import get_db
-from ..models import AccountSmsSettings
+from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
 
 router = APIRouter(prefix="/api/sms/webhooks", tags=["sms-webhooks"])
 
@@ -86,6 +86,78 @@ def _update_outbox_status(db: Session, message_sid: str, status_value: str, payl
     db.commit()
 
 
+def _ensure_pricing(db: Session) -> SmsPricingSettings:
+    row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
+    if row:
+        return row
+    row = SmsPricingSettings(
+        sms_starting_credits=1000,
+        sms_monthly_number_cost=100,
+        sms_send_cost=5,
+        sms_forward_cost=5,
+        sms_suspend_after_days=14,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _record_sms_debit(
+    db: Session,
+    settings: Optional[AccountSmsSettings],
+    params: dict,
+) -> None:
+    if not settings:
+        return
+    message_sid = (params.get("MessageSid") or "").strip()
+    if not message_sid:
+        return
+    status = (params.get("MessageStatus") or "").lower()
+    if status not in {"sent", "delivered"}:
+        return
+    existing = (
+        db.query(SmsCreditLedger.id)
+        .filter(
+            SmsCreditLedger.user_id == settings.user_id,
+            SmsCreditLedger.entry_type == "debit",
+            SmsCreditLedger.reference_id == message_sid,
+        )
+        .first()
+    )
+    if existing:
+        return
+
+    try:
+        num_segments = int(params.get("NumSegments") or 1)
+    except (TypeError, ValueError):
+        num_segments = 1
+    num_segments = max(1, num_segments)
+    pricing = _ensure_pricing(db)
+    credits_per_segment = int(pricing.sms_send_cost or 0)
+    total_credits = max(0, num_segments * credits_per_segment)
+    if total_credits <= 0:
+        return
+
+    entry = SmsCreditLedger(
+        user_id=settings.user_id,
+        entry_type="debit",
+        amount=total_credits,
+        reason="sms_send",
+        reference_id=message_sid,
+        details={
+            "message_sid": message_sid,
+            "to": params.get("To"),
+            "from": params.get("From"),
+            "segments": num_segments,
+            "status": status,
+            "credits_per_segment": credits_per_segment,
+        },
+    )
+    db.add(entry)
+    db.commit()
+
+
 @router.post("/inbound")
 async def inbound_sms(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
@@ -130,5 +202,6 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
 
     if message_sid:
         _update_outbox_status(db, message_sid, mapped_status, params)
+        _record_sms_debit(db, settings, params)
 
     return {"ok": True}
