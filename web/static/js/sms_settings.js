@@ -63,8 +63,8 @@
       "aria-label",
       isEnabled ? `SMS credits ${label}` : "Enable SMS"
     );
-    balanceChip.title = isEnabled ? "Open SMS activity" : "Enable SMS";
-    balanceChip.href = isEnabled ? "/schedule#sms-activity" : "/settings#sms";
+    balanceChip.title = isEnabled ? "Open SMS billing" : "Enable SMS";
+    balanceChip.href = isEnabled ? "/sms_billing" : "/settings#sms";
     balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
   }
 
