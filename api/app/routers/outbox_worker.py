@@ -298,6 +298,8 @@ def _send_sms_via_twilio(db: Session, job: EmailOutbox) -> str:
         "Body": job.body or "",
     }
     webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
+    if not webhook_base:
+        webhook_base = (os.getenv("APP_BASE_URL", "") or "").strip()
     if webhook_base:
         payload["StatusCallback"] = f"{webhook_base.rstrip('/')}/api/sms/webhooks/status"
         payload["StatusCallbackMethod"] = "POST"
