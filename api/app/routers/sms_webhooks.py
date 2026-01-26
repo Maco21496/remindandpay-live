@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..crypto_secrets import decrypt_secret
 from ..database import get_db
-from ..models import AccountSmsSettings
+from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings, SmsWebhookLog
 
 router = APIRouter(prefix="/api/sms/webhooks", tags=["sms-webhooks"])
 
@@ -86,10 +86,112 @@ def _update_outbox_status(db: Session, message_sid: str, status_value: str, payl
     db.commit()
 
 
+def _lookup_outbox_by_sid(db: Session, message_sid: str) -> Optional[EmailOutbox]:
+    if not message_sid:
+        return None
+    return (
+        db.query(EmailOutbox)
+        .filter(EmailOutbox.provider_message_id == message_sid)
+        .first()
+    )
+
+
+def _ensure_pricing(db: Session) -> SmsPricingSettings:
+    row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
+    if row:
+        return row
+    row = SmsPricingSettings(
+        sms_starting_credits=1000,
+        sms_monthly_number_cost=100,
+        sms_send_cost=5,
+        sms_forward_cost=5,
+        sms_suspend_after_days=14,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _record_sms_debit(
+    db: Session,
+    settings: Optional[AccountSmsSettings],
+    params: dict,
+) -> None:
+    message_sid = (params.get("MessageSid") or "").strip()
+    if not message_sid:
+        return
+    outbox = _lookup_outbox_by_sid(db, message_sid)
+    if not settings and not outbox:
+        return
+    status = (params.get("MessageStatus") or "").lower()
+    if status not in {"sent", "delivered"}:
+        return
+    existing = (
+        db.query(SmsCreditLedger.id)
+        .filter(
+            SmsCreditLedger.user_id == (settings.user_id if settings else outbox.user_id),
+            SmsCreditLedger.entry_type == "debit",
+            SmsCreditLedger.reference_id == message_sid,
+        )
+        .first()
+    )
+    if existing:
+        return
+
+    try:
+        num_segments = int(params.get("NumSegments") or 1)
+    except (TypeError, ValueError):
+        num_segments = 1
+    num_segments = max(1, num_segments)
+    pricing = _ensure_pricing(db)
+    credits_per_segment = int(pricing.sms_send_cost or 0)
+    total_credits = max(0, num_segments * credits_per_segment)
+    if total_credits <= 0:
+        return
+
+    user_id = settings.user_id if settings else outbox.user_id
+    to_number = params.get("To") or (outbox.to_email if outbox else None)
+    from_number = params.get("From")
+    entry = SmsCreditLedger(
+        user_id=user_id,
+        entry_type="debit",
+        amount=total_credits,
+        reason="sms_send",
+        reference_id=message_sid,
+        details={
+            "message_sid": message_sid,
+            "to": to_number,
+            "from": from_number,
+            "segments": num_segments,
+            "status": status,
+            "credits_per_segment": credits_per_segment,
+            "outbox_id": outbox.id if outbox else None,
+            "customer_id": outbox.customer_id if outbox else None,
+        },
+    )
+    db.add(entry)
+    db.commit()
+
+
+def _log_sms_webhook(db: Session, kind: str, params: dict) -> None:
+    if (os.getenv("TWILIO_LOG_WEBHOOKS", "") or "").strip().lower() not in {"1", "true", "yes"}:
+        return
+    record = SmsWebhookLog(
+        kind=kind,
+        account_sid=(params.get("AccountSid") or "").strip() or None,
+        message_sid=(params.get("MessageSid") or "").strip() or None,
+        payload=params,
+    )
+    db.add(record)
+    db.commit()
+
+
 @router.post("/inbound")
 async def inbound_sms(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     params = _normalize_params(dict(form))
+    _log_sms_webhook(db, "inbound", params)
     account_sid = params.get("AccountSid")
     to_number = params.get("To")
 
@@ -108,6 +210,7 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
 async def sms_status(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     params = _normalize_params(dict(form))
+    _log_sms_webhook(db, "status", params)
     account_sid = params.get("AccountSid")
     to_number = params.get("To")
 
@@ -130,5 +233,6 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
 
     if message_sid:
         _update_outbox_status(db, message_sid, mapped_status, params)
+        _record_sms_debit(db, settings, params)
 
     return {"ok": True}
