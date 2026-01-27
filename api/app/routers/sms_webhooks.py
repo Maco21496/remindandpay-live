@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+import requests
 
 from ..crypto_secrets import decrypt_secret
 from ..database import get_db
@@ -19,6 +20,10 @@ router = APIRouter(prefix="/api/sms/webhooks", tags=["sms-webhooks"])
 
 def _normalize_params(form: dict) -> dict:
     return {k: v if not isinstance(v, list) else (v[0] if v else "") for k, v in form.items()}
+
+
+def _twilio_auth_headers(username: str, password: str) -> tuple[str, str]:
+    return (username, password)
 
 
 def _build_twilio_signature(url: str, params: dict, auth_token: str) -> str:
@@ -113,6 +118,30 @@ def _ensure_pricing(db: Session) -> SmsPricingSettings:
     return row
 
 
+def _twilio_fetch_message_details(account_sid: str, message_sid: str) -> dict:
+    if not account_sid or not message_sid:
+        return {}
+    api_key_sid = (os.getenv("TWILIO_API_KEY_SID", "") or "").strip()
+    api_key_secret = (os.getenv("TWILIO_API_KEY_SECRET", "") or "").strip()
+    master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
+    master_auth_token = (os.getenv("TWILIO_AUTH_TOKEN", "") or "").strip()
+    if not api_key_sid or not api_key_secret:
+        return {}
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages/{message_sid}.json"
+    primary_auth = _twilio_auth_headers(api_key_sid, api_key_secret)
+    fallback_auth = (
+        _twilio_auth_headers(master_sid, master_auth_token)
+        if master_sid and master_auth_token
+        else None
+    )
+    r = requests.get(url, auth=primary_auth, timeout=20)
+    if r.status_code == 401 and fallback_auth:
+        r = requests.get(url, auth=fallback_auth, timeout=20)
+    if not r.ok:
+        return {}
+    return r.json() or {}
+
+
 def _record_sms_debit(
     db: Session,
     settings: Optional[AccountSmsSettings],
@@ -139,8 +168,15 @@ def _record_sms_debit(
     if existing:
         return
 
+    num_segments_value = params.get("NumSegments")
+    if num_segments_value in (None, ""):
+        details = _twilio_fetch_message_details(
+            (params.get("AccountSid") or "").strip(),
+            message_sid,
+        )
+        num_segments_value = details.get("num_segments")
     try:
-        num_segments = int(params.get("NumSegments") or 1)
+        num_segments = int(num_segments_value or 1)
     except (TypeError, ValueError):
         num_segments = 1
     num_segments = max(1, num_segments)
@@ -201,7 +237,15 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
 
     if settings.twilio_auth_token_enc:
         auth_token = decrypt_secret(settings.twilio_auth_token_enc)
-        _validate_twilio_signature(request, params, auth_token)
+        try:
+            _validate_twilio_signature(request, params, auth_token)
+        except HTTPException as exc:
+            _log_sms_webhook(
+                db,
+                "signature-error",
+                {"error": exc.detail, "kind": "inbound", **params},
+            )
+            raise
 
     return {"ok": True}
 
@@ -217,7 +261,15 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
     settings = _lookup_sms_settings(db, account_sid, to_number)
     if settings and settings.twilio_auth_token_enc:
         auth_token = decrypt_secret(settings.twilio_auth_token_enc)
-        _validate_twilio_signature(request, params, auth_token)
+        try:
+            _validate_twilio_signature(request, params, auth_token)
+        except HTTPException as exc:
+            _log_sms_webhook(
+                db,
+                "signature-error",
+                {"error": exc.detail, "kind": "status", **params},
+            )
+            raise
 
     message_sid = params.get("MessageSid")
     message_status = (params.get("MessageStatus") or "").lower()
