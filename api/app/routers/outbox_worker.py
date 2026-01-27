@@ -429,8 +429,17 @@ def process_once() -> int:
                     if res.message_id:
                         j.provider_message_id = str(res.message_id)
 
+                current_delivery = (
+                    db.query(EmailOutbox.delivery_status)
+                    .filter(EmailOutbox.id == j.id)
+                    .scalar()
+                )
+                terminal_statuses = {"delivered", "bounced", "complained"}
                 j.status = "sent"
-                j.delivery_status = "sent"
+                if current_delivery in terminal_statuses:
+                    j.delivery_status = current_delivery
+                else:
+                    j.delivery_status = "sent"
                 j.updated_at = datetime.utcnow()
                 j.lock_owner = None
                 j.lock_acquired_at = None
