@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import User
+from ..models import SmsWebhookLog, User
 from ..shared import templates
 from .auth import require_owner
 
@@ -126,3 +126,31 @@ def admin_deactivate_user(
     db.commit()
 
     return RedirectResponse(url="/admin/dashboard?tab=users", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/sms_webhooks")
+def admin_sms_webhooks(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    limit = max(1, min(500, int(limit or 100)))
+    logs = (
+        db.query(SmsWebhookLog)
+        .order_by(SmsWebhookLog.created_at.desc(), SmsWebhookLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "logs": [
+            {
+                "id": log.id,
+                "created_at": log.created_at,
+                "kind": log.kind,
+                "account_sid": log.account_sid,
+                "message_sid": log.message_sid,
+                "payload": log.payload,
+            }
+            for log in logs
+        ]
+    }
