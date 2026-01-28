@@ -228,158 +228,7 @@ def _log_sms_webhook(db: Session, kind: str, params: dict) -> None:
     )
     db.add(record)
     db.commit()
-    return int(getattr(result, "rowcount", 0) or 0)
-
-
-def _lookup_outbox_by_sid(db: Session, message_sid: str) -> Optional[EmailOutbox]:
-    if not message_sid:
-        return None
-    return (
-        db.query(EmailOutbox)
-        .filter(EmailOutbox.provider_message_id == message_sid)
-        .first()
-    )
-
-
-def _ensure_pricing(db: Session) -> SmsPricingSettings:
-    row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
-    if row:
-        return row
-    row = SmsPricingSettings(
-        sms_starting_credits=1000,
-        sms_monthly_number_cost=100,
-        sms_send_cost=5,
-        sms_forward_cost=5,
-        sms_suspend_after_days=14,
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def _twilio_fetch_message_details(account_sid: str, message_sid: str) -> dict:
-    if not account_sid or not message_sid:
-        return {}
-    api_key_sid = (os.getenv("TWILIO_API_KEY_SID", "") or "").strip()
-    api_key_secret = (os.getenv("TWILIO_API_KEY_SECRET", "") or "").strip()
-    master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
-    master_auth_token = (os.getenv("TWILIO_AUTH_TOKEN", "") or "").strip()
-    if not api_key_sid or not api_key_secret:
-        return {}
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages/{message_sid}.json"
-    primary_auth = _twilio_auth_headers(api_key_sid, api_key_secret)
-    fallback_auth = (
-        _twilio_auth_headers(master_sid, master_auth_token)
-        if master_sid and master_auth_token
-        else None
-    )
-    r = requests.get(url, auth=primary_auth, timeout=20)
-    if r.status_code == 401 and fallback_auth:
-        r = requests.get(url, auth=fallback_auth, timeout=20)
-    if not r.ok:
-        return {}
-    return r.json() or {}
-
-
-def _record_sms_debit(
-    db: Session,
-    settings: Optional[AccountSmsSettings],
-    params: dict,
-) -> None:
-    message_sid = (params.get("MessageSid") or "").strip()
-    if not message_sid:
-        return
-    outbox = _lookup_outbox_by_sid(db, message_sid)
-    if not settings and not outbox:
-        return
-    status = (params.get("MessageStatus") or "").lower()
-    if status not in {"sent", "delivered"}:
-        return
-    existing = (
-        db.query(SmsCreditLedger)
-        .filter(
-            SmsCreditLedger.user_id == (settings.user_id if settings else outbox.user_id),
-            SmsCreditLedger.entry_type == "debit",
-            SmsCreditLedger.reference_id == message_sid,
-        )
-        .first()
-    )
-    if existing:
-        if status == "delivered":
-            details = existing.details or {}
-            details["status"] = "delivered"
-            if not details.get("segments") or details.get("segments") == 1:
-                num_segments_value = params.get("NumSegments")
-                if num_segments_value in (None, ""):
-                    msg_details = _twilio_fetch_message_details(
-                        (params.get("AccountSid") or "").strip(),
-                        message_sid,
-                    )
-                    num_segments_value = msg_details.get("num_segments")
-                try:
-                    segs = int(num_segments_value or details.get("segments") or 1)
-                except (TypeError, ValueError):
-                    segs = int(details.get("segments") or 1)
-                details["segments"] = max(1, segs)
-            existing.details = details
-            db.add(existing)
-            db.commit()
-        return
-
-    num_segments_value = params.get("NumSegments")
-    if num_segments_value in (None, ""):
-        details = _twilio_fetch_message_details(
-            (params.get("AccountSid") or "").strip(),
-            message_sid,
-        )
-        num_segments_value = details.get("num_segments")
-    try:
-        num_segments = int(num_segments_value or 1)
-    except (TypeError, ValueError):
-        num_segments = 1
-    num_segments = max(1, num_segments)
-    pricing = _ensure_pricing(db)
-    credits_per_segment = int(pricing.sms_send_cost or 0)
-    total_credits = max(0, num_segments * credits_per_segment)
-    if total_credits <= 0:
-        return
-
-    user_id = settings.user_id if settings else outbox.user_id
-    to_number = params.get("To") or (outbox.to_email if outbox else None)
-    from_number = params.get("From")
-    entry = SmsCreditLedger(
-        user_id=user_id,
-        entry_type="debit",
-        amount=total_credits,
-        reason="sms_send",
-        reference_id=message_sid,
-        details={
-            "message_sid": message_sid,
-            "to": to_number,
-            "from": from_number,
-            "segments": num_segments,
-            "status": status,
-            "credits_per_segment": credits_per_segment,
-            "outbox_id": outbox.id if outbox else None,
-            "customer_id": outbox.customer_id if outbox else None,
-        },
-    )
-    db.add(entry)
-    db.commit()
-
-
-def _log_sms_webhook(db: Session, kind: str, params: dict) -> None:
-    if (os.getenv("TWILIO_LOG_WEBHOOKS", "") or "").strip().lower() not in {"1", "true", "yes"}:
-        return
-    record = SmsWebhookLog(
-        kind=kind,
-        account_sid=(params.get("AccountSid") or "").strip() or None,
-        message_sid=(params.get("MessageSid") or "").strip() or None,
-        payload=params,
-    )
-    db.add(record)
-    db.commit()
+    return None
 
 
 @router.post("/inbound")
@@ -443,13 +292,29 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
     mapped_status = status_map.get(message_status, "queued")
 
     if message_sid:
-        updated = _update_outbox_status(db, message_sid, mapped_status, params)
+        try:
+            updated = _update_outbox_status(db, message_sid, mapped_status, params)
+        except Exception as exc:
+            _log_sms_webhook(
+                db,
+                "status-error",
+                {"error": str(exc), "note": "outbox update failed", **params},
+            )
+            return {"ok": False, "error": "outbox_update_failed"}
         if updated == 0:
             _log_sms_webhook(
                 db,
                 "status-unmatched",
                 {"note": "no outbox row updated", **params},
             )
-        _record_sms_debit(db, settings, params)
+        try:
+            _record_sms_debit(db, settings, params)
+        except Exception as exc:
+            _log_sms_webhook(
+                db,
+                "status-error",
+                {"error": str(exc), "note": "ledger update failed", **params},
+            )
+            return {"ok": False, "error": "ledger_update_failed"}
 
     return {"ok": True}
