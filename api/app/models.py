@@ -107,6 +107,16 @@ class SmsCreditLedger(Base):
 
     user = relationship("User")
 
+class SmsWebhookLog(Base):
+    __tablename__ = "sms_webhook_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String(20), nullable=False)  # inbound | status
+    account_sid = Column(String(64), nullable=True)
+    message_sid = Column(String(64), nullable=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
 class Customer(Base):
     __tablename__ = "customers"
 
