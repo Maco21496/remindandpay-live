@@ -297,6 +297,12 @@ def _send_sms_via_twilio(db: Session, job: EmailOutbox) -> str:
         "To": to_number,
         "Body": job.body or "",
     }
+    webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
+    if not webhook_base:
+        webhook_base = (os.getenv("APP_BASE_URL", "") or "").strip()
+    if webhook_base:
+        payload["StatusCallback"] = f"{webhook_base.rstrip('/')}/api/sms/webhooks/status"
+        payload["StatusCallbackMethod"] = "POST"
     r_send = _twilio_request_with_fallback(
         "POST",
         send_url,
@@ -423,8 +429,17 @@ def process_once() -> int:
                     if res.message_id:
                         j.provider_message_id = str(res.message_id)
 
+                current_delivery = (
+                    db.query(EmailOutbox.delivery_status)
+                    .filter(EmailOutbox.id == j.id)
+                    .scalar()
+                )
+                terminal_statuses = {"delivered", "bounced", "complained"}
                 j.status = "sent"
-                j.delivery_status = "sent"
+                if current_delivery in terminal_statuses:
+                    j.delivery_status = current_delivery
+                else:
+                    j.delivery_status = "sent"
                 j.updated_at = datetime.utcnow()
                 j.lock_owner = None
                 j.lock_acquired_at = None
