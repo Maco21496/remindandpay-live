@@ -164,6 +164,7 @@
       <nav class="nav">
         <a href="/admin/dashboard?tab=users" data-admin-tab="users" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
         <a href="/admin/dashboard?tab=sms" data-admin-tab="sms" class="{% if active_tab == 'sms' %}active{% endif %}">SMS</a>
+        <a href="/admin/dashboard?tab=sms-webhooks" data-admin-tab="sms-webhooks" class="{% if active_tab == 'sms-webhooks' %}active{% endif %}">SMS Webhooks</a>
       </nav>
       <div class="owner-pill">
         Signed in as: <strong>{{ owner_email }}</strong>
@@ -255,6 +256,35 @@
           <div class="form-actions">
             <button class="btn btn-primary" id="sms-pricing-save" type="button">Save pricing</button>
             <span class="form-message" id="sms-pricing-msg"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section {% if active_tab == 'sms-webhooks' %}active{% endif %}" data-admin-section="sms-webhooks">
+        <div class="card">
+          <h2>SMS Webhook Logs</h2>
+          <p class="form-message">
+            Temporary debug view. Enable <code>TWILIO_LOG_WEBHOOKS=true</code> to store payloads.
+          </p>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="sms-webhooks-refresh" type="button">Refresh</button>
+            <span class="form-message" id="sms-webhooks-msg"></span>
+          </div>
+          <div style="margin-top:12px;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:160px;">Created</th>
+                  <th style="width:90px;">Kind</th>
+                  <th style="width:120px;">Status</th>
+                  <th>Message SID</th>
+                  <th>To</th>
+                  <th style="width:90px;">Segments</th>
+                </tr>
+              </thead>
+              <tbody id="sms-webhooks-rows"></tbody>
+            </table>
+            <div id="sms-webhooks-empty" class="empty" style="display:none;">No webhook logs yet.</div>
           </div>
         </div>
       </section>

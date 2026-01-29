@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block head %}
+  {{ super() }}
+  <link href="/static/css/schedule.css?v=20251026" rel="stylesheet"/>
+{% endblock %}
+
+{% set title = "SMS Billing" %}
+{% set active = "" %}
+
+{% block content %}
+  <div class="panel" style="margin-top:12px;">
+    <div class="panel__head">
+      <div>
+        <h2 style="margin:0;">SMS billing</h2>
+        <div class="muted" style="margin-top:4px;">
+          Itemised credits based on Twilio delivery callbacks.
+        </div>
+      </div>
+      <div class="filters" style="gap:8px;">
+        <span class="muted">Balance:</span>
+        <strong id="sms_billing_balance">0</strong>
+        <button id="sms_billing_refresh" class="btn btn--ghost">Refresh</button>
+      </div>
+    </div>
+
+    <div style="padding:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Created</th>
+            <th>Direction</th>
+            <th>To</th>
+            <th>Segments</th>
+            <th style="text-align:right;">Credits</th>
+            <th style="text-align:right;">Balance</th>
+          </tr>
+        </thead>
+        <tbody id="sms_billing_rows"></tbody>
+      </table>
+      <div id="sms_billing_empty" class="empty" style="display:none;">No SMS credits yet.</div>
+      <div class="filters" style="gap:8px; margin-top:12px; justify-content:flex-end;">
+        <button id="sms_billing_prev" class="btn btn--ghost">Prev</button>
+        <span id="sms_billing_page" class="muted"></span>
+        <button id="sms_billing_next" class="btn btn--ghost">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/sms_billing.js"></script>
+{% endblock %}

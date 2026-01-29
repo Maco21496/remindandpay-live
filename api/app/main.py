@@ -152,6 +152,10 @@ def message_templates_page(request: Request, user = Depends(require_user)):
 def settings_page(request: Request, user = Depends(require_user)):
     return templates.TemplateResponse("settings.html", {"request": request, "active": ""})
 
+@app.get("/sms_billing")
+def sms_billing_page(request: Request, user = Depends(require_user)):
+    return templates.TemplateResponse("sms_billing.html", {"request": request, "active": ""})
+
 @app.get("/support")
 def support_page(request: Request, user = Depends(require_user)):
     return templates.TemplateResponse("settings.html", {"request": request, "active": "", "title": "Support � Invoice Chaser"})

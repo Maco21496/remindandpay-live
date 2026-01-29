@@ -23,6 +23,10 @@
   const suspendAfterDays = document.getElementById("sms-suspend-after-days");
   const saveBtn = document.getElementById("sms-pricing-save");
   const msg = document.getElementById("sms-pricing-msg");
+  const webhookRows = document.getElementById("sms-webhooks-rows");
+  const webhookEmpty = document.getElementById("sms-webhooks-empty");
+  const webhookMsg = document.getElementById("sms-webhooks-msg");
+  const webhookRefresh = document.getElementById("sms-webhooks-refresh");
 
   async function loadPricing() {
     if (!startingCredits) return;
@@ -76,5 +80,54 @@
 
   if (activeTab === "sms") {
     loadPricing();
+  }
+
+  function renderWebhookRow(entry) {
+    const payload = entry.payload || {};
+    const status = payload.MessageStatus || payload.SmsStatus || "-";
+    const toNumber = payload.To || "-";
+    const segments = payload.NumSegments || "-";
+    return `
+      <tr>
+        <td>${entry.created_at || ""}</td>
+        <td>${entry.kind || ""}</td>
+        <td>${status}</td>
+        <td>${entry.message_sid || ""}</td>
+        <td>${toNumber}</td>
+        <td>${segments}</td>
+      </tr>
+    `;
+  }
+
+  async function loadWebhookLogs() {
+    if (!webhookRows) return;
+    webhookRows.innerHTML = "";
+    webhookEmpty.style.display = "none";
+    if (webhookMsg) webhookMsg.textContent = "Loading…";
+    try {
+      const response = await fetch("/admin/sms_webhooks?limit=200", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`Failed to load logs (${response.status})`);
+      }
+      const data = await response.json();
+      const logs = Array.isArray(data.logs) ? data.logs : [];
+      if (!logs.length) {
+        webhookEmpty.style.display = "block";
+      } else {
+        webhookRows.innerHTML = logs.map(renderWebhookRow).join("");
+      }
+      if (webhookMsg) webhookMsg.textContent = "";
+    } catch (error) {
+      if (webhookMsg) webhookMsg.textContent = "Failed to load webhook logs.";
+      console.error(error);
+    }
+  }
+
+  if (webhookRefresh) {
+    webhookRefresh.addEventListener("click", loadWebhookLogs);
+  }
+
+  if (activeTab === "sms-webhooks") {
+    loadWebhookLogs();
   }
 })();
