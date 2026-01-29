@@ -85,7 +85,8 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     db.refresh(row)
     return row
 
-def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
+def _calculate_credit_balance(db: Session, row: AccountSmsSettings) -> tuple[bool, int]:
+    user_id = row.user_id
     has_entries = (
         db.query(SmsCreditLedger.id)
         .filter(SmsCreditLedger.user_id == user_id)
@@ -110,7 +111,21 @@ def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
         .filter(SmsCreditLedger.user_id == user_id)
         .scalar()
     )
-    return True, int(total or 0)
+
+    has_credit = (
+        db.query(SmsCreditLedger.id)
+        .filter(
+            SmsCreditLedger.user_id == user_id,
+            SmsCreditLedger.entry_type == "credit",
+        )
+        .first()
+        is not None
+    )
+    base_balance = 0
+    if not has_credit:
+        base_balance = int((row.credits_balance or 0) + (row.free_credits or 0))
+
+    return True, int(total or 0) + base_balance
 
 def _ensure_pricing(db: Session) -> SmsPricingSettings:
     row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
@@ -601,7 +616,7 @@ def get_sms_ledger(
     limit = max(1, min(200, int(limit or 50)))
     offset = max(0, int(offset or 0))
     row = _ensure_sms_settings(db, user.id)
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     entries = (
@@ -641,7 +656,7 @@ def get_sms_settings(
     user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
@@ -719,7 +734,7 @@ def enable_sms(
     db.commit()
     db.refresh(row)
 
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
@@ -771,7 +786,7 @@ def update_sms_settings(
     db.commit()
     db.refresh(row)
 
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
