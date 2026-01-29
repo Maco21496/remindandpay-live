@@ -9,8 +9,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 import requests
+from cryptography.exceptions import InvalidTag
 
-from ..crypto_secrets import decrypt_secret
+from ..crypto_secrets import decrypt_secret, key_fingerprint
 from ..database import get_db
 from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings, SmsWebhookLog
 
@@ -244,7 +245,21 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "reason": "unknown_number"}
 
     if settings.twilio_auth_token_enc:
-        auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        try:
+            auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        except InvalidTag:
+            _log_sms_webhook(
+                db,
+                "auth-token-error",
+                {
+                    "error": "invalid_auth_token",
+                    "kind": "inbound",
+                    "key_fingerprint": key_fingerprint(),
+                    "subaccount_sid": settings.twilio_subaccount_sid,
+                    **params,
+                },
+            )
+            return {"ok": False, "error": "auth_token_invalid"}
         try:
             _validate_twilio_signature(request, params, auth_token)
         except HTTPException as exc:
@@ -268,7 +283,21 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
 
     settings = _lookup_sms_settings(db, account_sid, to_number)
     if settings and settings.twilio_auth_token_enc:
-        auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        try:
+            auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        except InvalidTag:
+            _log_sms_webhook(
+                db,
+                "auth-token-error",
+                {
+                    "error": "invalid_auth_token",
+                    "kind": "status",
+                    "key_fingerprint": key_fingerprint(),
+                    "subaccount_sid": settings.twilio_subaccount_sid,
+                    **params,
+                },
+            )
+            return {"ok": False, "error": "auth_token_invalid"}
         try:
             _validate_twilio_signature(request, params, auth_token)
         except HTTPException as exc:

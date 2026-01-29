@@ -3,6 +3,10 @@ import os
 import base64
 from secrets import token_bytes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import hashlib
+
+_V2_PREFIX = "v2:"
+_V1_PREFIX = "v1:"
 
 def _get_key() -> bytes:
     k = os.getenv("APP_SECRETS_KEY")
@@ -32,12 +36,22 @@ def encrypt_secret(plaintext: str) -> str:
     aes = AESGCM(key)
     nonce = token_bytes(12)
     ct = aes.encrypt(nonce, plaintext.encode("utf-8"), None)
-    return base64.b64encode(nonce + ct).decode("ascii")
+    return f"{_V2_PREFIX}{base64.b64encode(nonce + ct).decode('ascii')}"
 
 def decrypt_secret(token_b64: str) -> str:
+    token = token_b64
+    if token.startswith(_V2_PREFIX) or token.startswith(_V1_PREFIX):
+        token = token[3:]
     key = _get_key()
-    raw = base64.b64decode(token_b64)
+    raw = base64.b64decode(token)
     nonce, ct = raw[:12], raw[12:]
     aes = AESGCM(key)
     pt = aes.decrypt(nonce, ct, None)
     return pt.decode("utf-8")
+
+def key_fingerprint() -> str:
+    try:
+        key = _get_key()
+    except Exception:
+        return "missing"
+    return hashlib.sha256(key).hexdigest()[:12]
