@@ -123,7 +123,7 @@ def _calculate_credit_balance(db: Session, row: AccountSmsSettings) -> tuple[boo
     )
     base_balance = 0
     if not has_credit:
-        base_balance = int((row.credits_balance or 0) + (row.free_credits or 0))
+        base_balance = int(row.credits_balance or 0)
 
     return True, int(total or 0) + base_balance
 
@@ -729,6 +729,38 @@ def enable_sms(
     if first_enable and row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
         row.free_credits = pricing.sms_starting_credits
+
+    if first_enable:
+        starter_credits = int(pricing.sms_starting_credits or 0)
+        if starter_credits > 0:
+            db.add(
+                SmsCreditLedger(
+                    user_id=user.id,
+                    entry_type="credit",
+                    amount=starter_credits,
+                    reason="starter_pack",
+                    reference_id=f"sms_enable:{row.id}",
+                    details={
+                        "source": "sms_enable",
+                        "note": "Starter credits",
+                    },
+                )
+            )
+        monthly_cost = int(pricing.sms_monthly_number_cost or 0)
+        if monthly_cost > 0:
+            db.add(
+                SmsCreditLedger(
+                    user_id=user.id,
+                    entry_type="debit",
+                    amount=monthly_cost,
+                    reason="sms_number_monthly",
+                    reference_id=f"sms_enable:{row.id}",
+                    details={
+                        "source": "sms_enable",
+                        "note": "Initial monthly number charge",
+                    },
+                )
+            )
 
     db.add(row)
     db.commit()
