@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import requests
 from cryptography.exceptions import InvalidTag
 
-from ..crypto_secrets import decrypt_secret, encrypt_secret, key_fingerprint
+from ..crypto_secrets import decrypt_secret, key_fingerprint
 from ..database import get_db
 from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings, SmsWebhookLog
 
@@ -61,45 +61,6 @@ def _lookup_sms_settings(db: Session, account_sid: Optional[str], to_number: Opt
             .first()
         )
     return None
-
-
-def _refresh_twilio_auth_token(db: Session, settings: AccountSmsSettings) -> bool:
-    if not settings.twilio_subaccount_sid:
-        return False
-    master_sid = (os.getenv("TWILIO_ACCOUNT_SID", "") or "").strip()
-    master_auth_token = (os.getenv("TWILIO_AUTH_TOKEN", "") or "").strip()
-    if not master_sid or not master_auth_token:
-        return False
-    subaccount_url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_subaccount_sid}.json"
-    response = requests.get(
-        subaccount_url,
-        auth=_twilio_auth_headers(master_sid, master_auth_token),
-        timeout=20,
-    )
-    if not response.ok:
-        return False
-    auth_token = (response.json() or {}).get("auth_token")
-    if not auth_token:
-        return False
-    settings.twilio_auth_token_enc = encrypt_secret(auth_token)
-    db.add(settings)
-    db.commit()
-    db.refresh(settings)
-    return True
-
-
-def _get_twilio_auth_token(db: Session, settings: AccountSmsSettings) -> Optional[str]:
-    if not settings.twilio_auth_token_enc:
-        return None
-    try:
-        return decrypt_secret(settings.twilio_auth_token_enc)
-    except InvalidTag:
-        if _refresh_twilio_auth_token(db, settings):
-            try:
-                return decrypt_secret(settings.twilio_auth_token_enc)
-            except InvalidTag:
-                return None
-        return None
 
 
 def _update_outbox_status(db: Session, message_sid: str, status_value: str, payload: dict) -> int:
@@ -284,8 +245,9 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "reason": "unknown_number"}
 
     if settings.twilio_auth_token_enc:
-        auth_token = _get_twilio_auth_token(db, settings)
-        if not auth_token:
+        try:
+            auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        except InvalidTag:
             _log_sms_webhook(
                 db,
                 "auth-token-error",
@@ -321,8 +283,9 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
 
     settings = _lookup_sms_settings(db, account_sid, to_number)
     if settings and settings.twilio_auth_token_enc:
-        auth_token = _get_twilio_auth_token(db, settings)
-        if not auth_token:
+        try:
+            auth_token = decrypt_secret(settings.twilio_auth_token_enc)
+        except InvalidTag:
             _log_sms_webhook(
                 db,
                 "auth-token-error",
