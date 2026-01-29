@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import requests
 from cryptography.exceptions import InvalidTag
 
-from ..crypto_secrets import decrypt_secret, encrypt_secret
+from ..crypto_secrets import decrypt_secret, encrypt_secret, key_fingerprint
 from ..database import get_db
 from ..models import AccountSmsSettings, EmailOutbox, SmsCreditLedger, SmsPricingSettings, SmsWebhookLog
 
@@ -289,7 +289,13 @@ async def inbound_sms(request: Request, db: Session = Depends(get_db)):
             _log_sms_webhook(
                 db,
                 "auth-token-error",
-                {"error": "invalid_auth_token", "kind": "inbound", **params},
+                {
+                    "error": "invalid_auth_token",
+                    "kind": "inbound",
+                    "key_fingerprint": key_fingerprint(),
+                    "subaccount_sid": settings.twilio_subaccount_sid,
+                    **params,
+                },
             )
             return {"ok": False, "error": "auth_token_invalid"}
         try:
@@ -320,7 +326,13 @@ async def sms_status(request: Request, db: Session = Depends(get_db)):
             _log_sms_webhook(
                 db,
                 "auth-token-error",
-                {"error": "invalid_auth_token", "kind": "status", **params},
+                {
+                    "error": "invalid_auth_token",
+                    "kind": "status",
+                    "key_fingerprint": key_fingerprint(),
+                    "subaccount_sid": settings.twilio_subaccount_sid,
+                    **params,
+                },
             )
             return {"ok": False, "error": "auth_token_invalid"}
         try:
