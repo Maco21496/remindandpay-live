@@ -1,7 +1,7 @@
 # api/app/routers/sms_settings.py
 from datetime import datetime
 import os
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -52,6 +52,22 @@ class PricingOut(BaseModel):
     sms_suspend_after_days: int
 
 
+class LedgerEntryOut(BaseModel):
+    id: int
+    created_at: datetime
+    entry_type: str
+    amount: int
+    reason: str
+    reference_id: Optional[str] = None
+    details: Optional[dict] = None
+    balance_after: int
+
+
+class LedgerOut(BaseModel):
+    balance: int
+    entries: List[LedgerEntryOut]
+
+
 def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     row = (
         db.query(AccountSmsSettings)
@@ -69,7 +85,8 @@ def _ensure_sms_settings(db: Session, user_id: int) -> AccountSmsSettings:
     db.refresh(row)
     return row
 
-def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
+def _calculate_credit_balance(db: Session, row: AccountSmsSettings) -> tuple[bool, int]:
+    user_id = row.user_id
     has_entries = (
         db.query(SmsCreditLedger.id)
         .filter(SmsCreditLedger.user_id == user_id)
@@ -94,7 +111,21 @@ def _calculate_credit_balance(db: Session, user_id: int) -> tuple[bool, int]:
         .filter(SmsCreditLedger.user_id == user_id)
         .scalar()
     )
-    return True, int(total or 0)
+
+    has_credit = (
+        db.query(SmsCreditLedger.id)
+        .filter(
+            SmsCreditLedger.user_id == user_id,
+            SmsCreditLedger.entry_type == "credit",
+        )
+        .first()
+        is not None
+    )
+    base_balance = 0
+    if not has_credit:
+        base_balance = int((row.credits_balance or 0) + (row.free_credits or 0))
+
+    return True, int(total or 0) + base_balance
 
 def _ensure_pricing(db: Session) -> SmsPricingSettings:
     row = db.query(SmsPricingSettings).order_by(SmsPricingSettings.id.asc()).first()
@@ -574,13 +605,58 @@ def get_pricing(
     row = _ensure_pricing(db)
     return PricingOut(**_build_pricing_snapshot(row))
 
+
+@router.get("/ledger", response_model=LedgerOut)
+def get_sms_ledger(
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    limit = max(1, min(200, int(limit or 50)))
+    offset = max(0, int(offset or 0))
+    row = _ensure_sms_settings(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
+    balance = ledger_balance if has_ledger else (row.credits_balance or 0)
+
+    entries = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .order_by(SmsCreditLedger.created_at.desc(), SmsCreditLedger.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    running = balance
+    items: List[LedgerEntryOut] = []
+    for entry in entries:
+        items.append(
+            LedgerEntryOut(
+                id=entry.id,
+                created_at=entry.created_at,
+                entry_type=entry.entry_type,
+                amount=entry.amount,
+                reason=entry.reason,
+                reference_id=entry.reference_id,
+                details=entry.details,
+                balance_after=running,
+            )
+        )
+        if entry.entry_type == "credit":
+            running -= entry.amount
+        else:
+            running += entry.amount
+
+    return LedgerOut(balance=balance, entries=items)
+
 @router.get("/settings", response_model=SmsSettingsOut)
 def get_sms_settings(
     db: Session = Depends(get_db),
     user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
@@ -658,7 +734,7 @@ def enable_sms(
     db.commit()
     db.refresh(row)
 
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
@@ -710,7 +786,7 @@ def update_sms_settings(
     db.commit()
     db.refresh(row)
 
-    has_ledger, ledger_balance = _calculate_credit_balance(db, user.id)
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
 
     return SmsSettingsOut(
