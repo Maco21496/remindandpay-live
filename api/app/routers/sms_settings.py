@@ -1,5 +1,6 @@
 # api/app/routers/sms_settings.py
 from datetime import datetime
+import calendar
 import os
 from typing import Optional, List
 
@@ -15,6 +16,14 @@ from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
 from ..crypto_secrets import encrypt_secret
 from .auth import require_user
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
+
+def _add_months(anchor: datetime, months: int = 1) -> datetime:
+    month_index = (anchor.month - 1) + months
+    year = anchor.year + (month_index // 12)
+    month = (month_index % 12) + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(anchor.day, last_day)
+    return anchor.replace(year=year, month=month, day=day)
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
@@ -691,8 +700,9 @@ def enable_sms(
     if not webhook_base:
         raise HTTPException(status_code=400, detail="TWILIO_WEBHOOK_BASE_URL is not configured.")
 
+    now = datetime.utcnow()
     row.enabled = True
-    row.terms_accepted_at = datetime.utcnow()
+    row.terms_accepted_at = now
     row.terms_version = (payload.terms_version or "v1")[:32]
     row.terms_accepted_ip = request.client.host if request.client else None
     row.accepted_pricing_snapshot = snapshot
@@ -725,6 +735,15 @@ def enable_sms(
             row.twilio_phone_sid = provisioned.get("phone_sid") or row.twilio_phone_sid
             if not row.twilio_phone_sid or not row.twilio_phone_number:
                 raise HTTPException(status_code=502, detail="Twilio did not return a provisioned phone number.")
+
+    if row.sms_enabled_at is None:
+        row.sms_enabled_at = now
+
+    if row.next_number_charge_at is None:
+        row.next_number_charge_at = _add_months(now, 1)
+
+    if first_enable:
+        row.past_due_since = None
 
     if first_enable and row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
