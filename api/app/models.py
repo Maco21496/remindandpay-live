@@ -43,6 +43,9 @@ class AppSettings(Base):
 
 class AccountSmsSettings(Base):
     __tablename__ = "account_sms_settings"
+    __table_args__ = (
+        Index("ix_account_sms_settings_due", "enabled", "next_number_charge_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
@@ -73,6 +76,10 @@ class AccountSmsSettings(Base):
     terms_accepted_ip = Column(String(64), nullable=True)
     accepted_pricing_snapshot = Column(JSON, nullable=True)
 
+    sms_enabled_at = Column(DateTime, nullable=True)
+    next_number_charge_at = Column(DateTime, nullable=True)
+    past_due_since = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -93,6 +100,9 @@ class SmsPricingSettings(Base):
 
 class SmsCreditLedger(Base):
     __tablename__ = "sms_credit_ledger"
+    __table_args__ = (
+        Index("uq_sms_credit_ledger_reference_id", "reference_id", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
