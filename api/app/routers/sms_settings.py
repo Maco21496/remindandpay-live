@@ -7,6 +7,7 @@ from typing import Optional, List
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import requests
 
@@ -24,6 +25,12 @@ def _add_months(anchor: datetime, months: int = 1) -> datetime:
     last_day = calendar.monthrange(year, month)[1]
     day = min(anchor.day, last_day)
     return anchor.replace(year=year, month=month, day=day)
+
+def _effective_credit_balance(db: Session, row: AccountSmsSettings) -> int:
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
+    if has_ledger:
+        return ledger_balance
+    return int(row.credits_balance or 0)
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
@@ -800,6 +807,90 @@ def enable_sms(
         terms_accepted_at=row.terms_accepted_at,
         terms_version=row.terms_version,
     )
+
+@router.post("/billing/enqueue-due")
+def enqueue_due_sms_billing(db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    pricing = _ensure_pricing(db)
+    monthly_cost = int(pricing.sms_monthly_number_cost or 0)
+    rows = (
+        db.query(AccountSmsSettings)
+        .filter(
+            AccountSmsSettings.enabled == True,  # noqa: E712
+            AccountSmsSettings.twilio_phone_number.isnot(None),
+            AccountSmsSettings.next_number_charge_at.isnot(None),
+            AccountSmsSettings.next_number_charge_at <= now,
+        )
+        .order_by(AccountSmsSettings.next_number_charge_at.asc())
+        .all()
+    )
+
+    processed = 0
+    charged = 0
+    past_due = 0
+    skipped = 0
+
+    for row in rows:
+        due_at = row.next_number_charge_at or now
+        cycle = due_at.strftime("%Y-%m")
+        balance = _effective_credit_balance(db, row)
+
+        if monthly_cost <= 0:
+            row.next_number_charge_at = _add_months(due_at, 1)
+            row.past_due_since = None
+            db.add(row)
+            db.commit()
+            processed += 1
+            skipped += 1
+            continue
+
+        if balance >= monthly_cost:
+            reference_id = f"sms_number_monthly:settings:{row.id}:{cycle}"
+            already_charged = False
+            db.add(
+                SmsCreditLedger(
+                    user_id=row.user_id,
+                    entry_type="debit",
+                    amount=monthly_cost,
+                    reason="sms_number_monthly",
+                    reference_id=reference_id,
+                    details={
+                        "source": "sms_number_scheduler",
+                        "cycle": cycle,
+                    },
+                )
+            )
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                already_charged = True
+
+            row.next_number_charge_at = _add_months(due_at, 1)
+            row.past_due_since = None
+            db.add(row)
+            db.commit()
+            processed += 1
+            if already_charged:
+                skipped += 1
+            else:
+                charged += 1
+            continue
+
+        if row.past_due_since is None:
+            row.past_due_since = now
+        db.add(row)
+        db.commit()
+        processed += 1
+        past_due += 1
+
+    return {
+        "ok": True,
+        "processed": processed,
+        "charged": charged,
+        "past_due": past_due,
+        "skipped": skipped,
+    }
 
 @router.post("/settings", response_model=SmsSettingsOut)
 def update_sms_settings(
