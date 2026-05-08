@@ -8,6 +8,7 @@ INTERVAL = int(os.environ.get("SCHED_INTERVAL_SECONDS", "60"))
 URLS = [
     "/api/statement_reminders/statements/enqueue-due",
     "/api/chasing_reminders/enqueue-due",  
+    "/api/sms/billing/enqueue-due",
 ]
 
 def tick():
