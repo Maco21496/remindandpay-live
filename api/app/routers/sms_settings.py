@@ -3,6 +3,7 @@ from datetime import datetime
 import calendar
 import os
 from typing import Optional, List
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -977,6 +978,23 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                 },
                 dedupe_key=f"sms_number_past_due:{row.id}:{cycle}",
             )
+        else:
+            suspend_after_days = int(pricing.sms_suspend_after_days or 0)
+            if suspend_after_days > 0:
+                due_release_at = row.past_due_since + timedelta(days=suspend_after_days)
+                days_left = max(0, (due_release_at.date() - now.date()).days)
+                if days_left <= 3:
+                    _enqueue_app_notification(
+                        db,
+                        user=user,
+                        event_key="sms_release_warning",
+                        context={
+                            "user_name": user.email,
+                            "days_left": days_left,
+                            "balance": balance,
+                        },
+                        dedupe_key=f"sms_release_warning:{row.id}:{due_release_at.date().isoformat()}:{days_left}",
+                    )
         db.add(row)
         db.commit()
         processed += 1
