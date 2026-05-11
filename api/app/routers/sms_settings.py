@@ -1,20 +1,139 @@
 # api/app/routers/sms_settings.py
 from datetime import datetime
+import calendar
 import os
 from typing import Optional, List
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func
+from sqlalchemy import case, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import requests
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings
+from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
 from ..crypto_secrets import encrypt_secret
 from .auth import require_user
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
+
+def _add_months(anchor: datetime, months: int = 1) -> datetime:
+    month_index = (anchor.month - 1) + months
+    year = anchor.year + (month_index // 12)
+    month = (month_index % 12) + 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(anchor.day, last_day)
+    return anchor.replace(year=year, month=month, day=day)
+
+def _effective_credit_balance(db: Session, row: AccountSmsSettings) -> int:
+    has_ledger, ledger_balance = _calculate_credit_balance(db, row)
+    if has_ledger:
+        return ledger_balance
+    return int(row.credits_balance or 0)
+
+def _render_template(template: str, context: dict) -> str:
+    out = template or ""
+    for key, value in context.items():
+        out = out.replace(f"{{{{{key}}}}}", str(value if value is not None else ""))
+    return out
+
+def _enqueue_app_notification(
+    db: Session,
+    *,
+    user: User,
+    event_key: str,
+    context: dict,
+    dedupe_key: Optional[str],
+) -> bool:
+    template_row = db.execute(
+        text(
+            """
+            SELECT event_key, enabled, subject_template, body_template, from_email, from_name, cooldown_minutes
+            FROM app_notification_templates
+            WHERE event_key = :event_key AND channel = 'email'
+            LIMIT 1
+            """
+        ),
+        {"event_key": event_key},
+    ).mappings().first()
+    if not template_row or int(template_row.get("enabled") or 0) != 1:
+        return False
+
+    log_id = None
+    if dedupe_key:
+        inserted = db.execute(
+            text(
+                """
+                INSERT INTO app_notification_log (user_id, event_key, channel, dedupe_key, status, detail)
+                VALUES (:user_id, :event_key, 'email', :dedupe_key, 'queued', JSON_OBJECT('source','sms_scheduler'))
+                ON DUPLICATE KEY UPDATE id = id
+                """
+            ),
+            {"user_id": user.id, "event_key": event_key, "dedupe_key": dedupe_key},
+        )
+        if (inserted.rowcount or 0) == 0:
+            return False
+        log_row = db.execute(
+            text(
+                """
+                SELECT id FROM app_notification_log
+                WHERE dedupe_key = :dedupe_key
+                LIMIT 1
+                """
+            ),
+            {"dedupe_key": dedupe_key},
+        ).mappings().first()
+        if log_row:
+            log_id = log_row["id"]
+
+    subject = _render_template(template_row["subject_template"], context)
+    body = _render_template(template_row["body_template"], context)
+    from_email = (template_row.get("from_email") or os.getenv("NOTIFICATIONS_EMAIL", "")).strip() or None
+    from_name = (template_row.get("from_name") or os.getenv("NOTIFICATIONS_FROM_NAME", "Remind & Pay")).strip()
+
+    db.add(
+        EmailOutbox(
+            user_id=user.id,
+            customer_id=None,
+            invoice_id=None,
+            channel="email",
+            template=f"app_notification:{event_key}",
+            to_email=user.email,
+            subject=subject,
+            body=body,
+            payload_json={
+                "app_notification": True,
+                "event_key": event_key,
+                "from_email": from_email,
+                "from_name": from_name,
+                "notification_log_id": log_id,
+            },
+            status="queued",
+            next_attempt_at=datetime.utcnow(),
+        )
+    )
+    return True
+
+def _load_notification_triggers(db: Session) -> dict[str, dict]:
+    rows = db.execute(
+        text(
+            """
+            SELECT event_key, enabled, trigger_type, threshold_value, threshold_unit
+            FROM app_notification_triggers
+            """
+        )
+    ).mappings().all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out[str(r["event_key"])] = {
+            "enabled": int(r.get("enabled") or 0) == 1,
+            "trigger_type": (r.get("trigger_type") or "").strip().lower(),
+            "threshold_value": float(r.get("threshold_value") or 0),
+            "threshold_unit": (r.get("threshold_unit") or "").strip().lower(),
+        }
+    return out
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
@@ -691,8 +810,9 @@ def enable_sms(
     if not webhook_base:
         raise HTTPException(status_code=400, detail="TWILIO_WEBHOOK_BASE_URL is not configured.")
 
+    now = datetime.utcnow()
     row.enabled = True
-    row.terms_accepted_at = datetime.utcnow()
+    row.terms_accepted_at = now
     row.terms_version = (payload.terms_version or "v1")[:32]
     row.terms_accepted_ip = request.client.host if request.client else None
     row.accepted_pricing_snapshot = snapshot
@@ -725,6 +845,15 @@ def enable_sms(
             row.twilio_phone_sid = provisioned.get("phone_sid") or row.twilio_phone_sid
             if not row.twilio_phone_sid or not row.twilio_phone_number:
                 raise HTTPException(status_code=502, detail="Twilio did not return a provisioned phone number.")
+
+    if row.sms_enabled_at is None:
+        row.sms_enabled_at = now
+
+    if row.next_number_charge_at is None:
+        row.next_number_charge_at = _add_months(now, 1)
+
+    if first_enable:
+        row.past_due_since = None
 
     if first_enable and row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
@@ -781,6 +910,152 @@ def enable_sms(
         terms_accepted_at=row.terms_accepted_at,
         terms_version=row.terms_version,
     )
+
+@router.post("/billing/enqueue-due")
+def enqueue_due_sms_billing(db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    pricing = _ensure_pricing(db)
+    trigger_rules = _load_notification_triggers(db)
+    monthly_cost = int(pricing.sms_monthly_number_cost or 0)
+    rows = (
+        db.query(AccountSmsSettings)
+        .filter(
+            AccountSmsSettings.enabled == True,  # noqa: E712
+            AccountSmsSettings.twilio_phone_number.isnot(None),
+            AccountSmsSettings.next_number_charge_at.isnot(None),
+            AccountSmsSettings.next_number_charge_at <= now,
+        )
+        .order_by(AccountSmsSettings.next_number_charge_at.asc())
+        .all()
+    )
+
+    processed = 0
+    charged = 0
+    past_due = 0
+    skipped = 0
+
+    for row in rows:
+        due_at = row.next_number_charge_at or now
+        cycle = due_at.strftime("%Y-%m")
+        balance = _effective_credit_balance(db, row)
+        user = db.query(User).filter(User.id == row.user_id).first()
+        if not user:
+            continue
+
+        if monthly_cost <= 0:
+            row.next_number_charge_at = _add_months(due_at, 1)
+            row.past_due_since = None
+            db.add(row)
+            db.commit()
+            processed += 1
+            skipped += 1
+            continue
+
+        if balance >= monthly_cost:
+            reference_id = f"sms_number_monthly:settings:{row.id}:{cycle}"
+            already_charged = False
+            db.add(
+                SmsCreditLedger(
+                    user_id=row.user_id,
+                    entry_type="debit",
+                    amount=monthly_cost,
+                    reason="sms_number_monthly",
+                    reference_id=reference_id,
+                    details={
+                        "source": "sms_number_scheduler",
+                        "cycle": cycle,
+                    },
+                )
+            )
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                already_charged = True
+
+            row.next_number_charge_at = _add_months(due_at, 1)
+            row.past_due_since = None
+            db.add(row)
+            db.commit()
+            processed += 1
+            if already_charged:
+                skipped += 1
+            else:
+                charged += 1
+                low_trigger = trigger_rules.get("sms_low_balance", {})
+                low_enabled = low_trigger.get("enabled", True)
+                low_type = low_trigger.get("trigger_type") or "low_balance_multiplier"
+                low_value = float(low_trigger.get("threshold_value") or 2)
+                if low_type == "low_balance_fixed":
+                    low_balance_threshold = int(low_value)
+                else:
+                    low_balance_threshold = int(monthly_cost * (low_value if low_value > 0 else 2))
+                new_balance = _effective_credit_balance(db, row)
+                if low_enabled and new_balance < low_balance_threshold:
+                    _enqueue_app_notification(
+                        db,
+                        user=user,
+                        event_key="sms_low_balance",
+                        context={
+                            "user_name": user.email,
+                            "balance": new_balance,
+                            "monthly_cost": monthly_cost,
+                        },
+                        dedupe_key=f"sms_low_balance:{row.id}:{cycle}",
+                    )
+                    db.commit()
+            continue
+
+        if row.past_due_since is None:
+            row.past_due_since = now
+            _enqueue_app_notification(
+                db,
+                user=user,
+                event_key="sms_number_past_due",
+                context={
+                    "user_name": user.email,
+                    "balance": balance,
+                    "monthly_cost": monthly_cost,
+                },
+                dedupe_key=f"sms_number_past_due:{row.id}:{cycle}",
+            )
+        else:
+            suspend_after_days = int(pricing.sms_suspend_after_days or 0)
+            if suspend_after_days > 0:
+                due_release_at = row.past_due_since + timedelta(days=suspend_after_days)
+                days_left = max(0, (due_release_at.date() - now.date()).days)
+                warning_trigger = trigger_rules.get("sms_release_warning", {})
+                warning_enabled = warning_trigger.get("enabled", True)
+                warning_type = warning_trigger.get("trigger_type") or "release_warning_hours"
+                warning_value = float(warning_trigger.get("threshold_value") or 72)
+                if warning_type == "release_warning_hours":
+                    warning_days = max(1, int(warning_value // 24))
+                else:
+                    warning_days = max(1, int(warning_value or 3))
+                if warning_enabled and days_left <= warning_days:
+                    _enqueue_app_notification(
+                        db,
+                        user=user,
+                        event_key="sms_release_warning",
+                        context={
+                            "user_name": user.email,
+                            "days_left": days_left,
+                            "balance": balance,
+                        },
+                        dedupe_key=f"sms_release_warning:{row.id}:{due_release_at.date().isoformat()}:{days_left}",
+                    )
+        db.add(row)
+        db.commit()
+        processed += 1
+        past_due += 1
+
+    return {
+        "ok": True,
+        "processed": processed,
+        "charged": charged,
+        "past_due": past_due,
+        "skipped": skipped,
+    }
 
 @router.post("/settings", response_model=SmsSettingsOut)
 def update_sms_settings(
