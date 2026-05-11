@@ -30,6 +30,9 @@
   const notificationsRows = document.getElementById("notifications-rows");
   const notificationsMsg = document.getElementById("notifications-msg");
   const notificationsRefresh = document.getElementById("notifications-refresh");
+  const notificationsLogRows = document.getElementById("notifications-log-rows");
+  const notificationsLogMsg = document.getElementById("notifications-log-msg");
+  const notificationsLogRefresh = document.getElementById("notifications-log-refresh");
 
   async function loadPricing() {
     if (!startingCredits) return;
@@ -152,7 +155,10 @@
         <td><input type="text" data-field="from_email" value="${esc(row.from_email || "")}" placeholder="(env default)"></td>
         <td><input type="text" data-field="subject_template" value="${esc(row.subject_template || "")}"></td>
         <td><textarea data-field="body_template" rows="3" style="min-width:260px;">${esc(row.body_template || "")}</textarea></td>
-        <td><button class="btn btn-primary" type="button" data-action="save-notification">Save</button></td>
+        <td>
+          <button class="btn btn-primary" type="button" data-action="save-notification">Save</button>
+          <button class="btn" type="button" data-action="test-notification">Test</button>
+        </td>
       </tr>
     `;
   }
@@ -204,18 +210,72 @@
     }
   }
 
+  async function testNotificationRow(rowEl) {
+    const id = Number(rowEl?.dataset?.templateId || 0);
+    if (!id) return;
+    if (notificationsMsg) notificationsMsg.textContent = `Queueing test ${id}…`;
+    try {
+      const response = await fetch(`/admin/notifications/templates/${id}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error(`Failed to queue test (${response.status})`);
+      if (notificationsMsg) notificationsMsg.textContent = "Test notification queued.";
+      await loadNotificationLogs();
+    } catch (error) {
+      if (notificationsMsg) notificationsMsg.textContent = "Failed to queue test notification.";
+      console.error(error);
+    }
+  }
+
+  function renderNotificationLogRow(row) {
+    return `
+      <tr>
+        <td>${esc(row.created_at || "")}</td>
+        <td>${esc(row.user_email || "")}</td>
+        <td>${esc(row.event_key || "")}</td>
+        <td>${esc(row.status || "")}</td>
+        <td>${esc(row.dedupe_key || "")}</td>
+      </tr>
+    `;
+  }
+
+  async function loadNotificationLogs() {
+    if (!notificationsLogRows) return;
+    notificationsLogRows.innerHTML = "";
+    if (notificationsLogMsg) notificationsLogMsg.textContent = "Loading…";
+    try {
+      const response = await fetch("/admin/notifications/log?limit=100", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Failed to load logs (${response.status})`);
+      const data = await response.json();
+      const logs = Array.isArray(data.logs) ? data.logs : [];
+      notificationsLogRows.innerHTML = logs.map(renderNotificationLogRow).join("");
+      if (notificationsLogMsg) notificationsLogMsg.textContent = "";
+    } catch (error) {
+      if (notificationsLogMsg) notificationsLogMsg.textContent = "Failed to load notification log.";
+      console.error(error);
+    }
+  }
+
   if (notificationsRefresh) {
     notificationsRefresh.addEventListener("click", loadNotifications);
   }
   if (notificationsRows) {
     notificationsRows.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action='save-notification']");
-      if (!button) return;
-      const row = button.closest("tr[data-template-id]");
-      if (row) saveNotificationRow(row);
+      const testButton = event.target.closest("[data-action='test-notification']");
+      const row = (button || testButton)?.closest("tr[data-template-id]");
+      if (!row) return;
+      if (button) saveNotificationRow(row);
+      if (testButton) testNotificationRow(row);
     });
+  }
+  if (notificationsLogRefresh) {
+    notificationsLogRefresh.addEventListener("click", loadNotificationLogs);
   }
   if (activeTab === "notifications") {
     loadNotifications();
+    loadNotificationLogs();
   }
 })();

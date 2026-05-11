@@ -308,10 +308,27 @@
                 <th>From Email</th>
                 <th>Subject</th>
                 <th>Body</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="notifications-rows"></tbody>
+          </table>
+          <h3 style="margin-top:18px;">Notification Log</h3>
+          <div class="form-actions" style="margin-bottom:10px;">
+            <button class="btn" type="button" id="notifications-log-refresh">Refresh log</button>
+            <span class="form-message" id="notifications-log-msg"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>User</th>
+                <th>Event</th>
+                <th>Status</th>
+                <th>Dedupe</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-log-rows"></tbody>
           </table>
         </div>
       </section>

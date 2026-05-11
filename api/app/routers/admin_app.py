@@ -1,5 +1,6 @@
 # FINAL VERSION OF api/app/routers/admin_app.py
 from typing import List
+import os
 
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -8,6 +9,7 @@ from sqlalchemy import text
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User
+from ..models import EmailOutbox
 from ..shared import templates
 from .auth import require_owner
 
@@ -208,3 +210,99 @@ def admin_update_notification_template(
         raise HTTPException(status_code=404, detail="Template not found")
     db.commit()
     return {"ok": True}
+
+
+@router.get("/notifications/log")
+def admin_notification_log(
+    limit: int = 100,
+    status_filter: str | None = None,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    limit = max(1, min(500, int(limit or 100)))
+    params = {"limit": limit}
+    where = ""
+    if status_filter:
+        where = "WHERE l.status = :status_filter"
+        params["status_filter"] = status_filter
+    rows = db.execute(
+        text(
+            f"""
+            SELECT l.id, l.user_id, u.email AS user_email, l.event_key, l.channel, l.status,
+                   l.dedupe_key, l.detail, l.created_at
+            FROM app_notification_log l
+            LEFT JOIN users u ON u.id = l.user_id
+            {where}
+            ORDER BY l.created_at DESC, l.id DESC
+            LIMIT :limit
+            """
+        ),
+        params,
+    ).mappings().all()
+    return {"logs": [dict(r) for r in rows]}
+
+
+@router.post("/notifications/templates/{template_id}/test")
+def admin_test_notification_template(
+    template_id: int,
+    payload: dict | None = None,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    payload = payload or {}
+    row = db.execute(
+        text(
+            """
+            SELECT event_key, enabled, subject_template, body_template, from_email, from_name
+            FROM app_notification_templates
+            WHERE id = :id
+            LIMIT 1
+            """
+        ),
+        {"id": template_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    to_email = (payload.get("to_email") or owner.email or "").strip()
+    if not to_email:
+        raise HTTPException(status_code=400, detail="No destination email available")
+
+    context = {
+        "user_name": "Test User",
+        "balance": 123,
+        "monthly_cost": 100,
+        "days_left": 3,
+        "topup_credits": 500,
+    }
+    subject = row["subject_template"] or ""
+    body = row["body_template"] or ""
+    for k, v in context.items():
+        subject = subject.replace(f"{{{{{k}}}}}", str(v))
+        body = body.replace(f"{{{{{k}}}}}", str(v))
+
+    from_email = (row.get("from_email") or os.getenv("NOTIFICATIONS_EMAIL", "")).strip() or None
+    from_name = (row.get("from_name") or os.getenv("NOTIFICATIONS_FROM_NAME", "Remind & Pay")).strip()
+
+    db.add(
+        EmailOutbox(
+            user_id=owner.id,
+            customer_id=None,
+            invoice_id=None,
+            channel="email",
+            template=f"app_notification:{row['event_key']}",
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            payload_json={
+                "app_notification": True,
+                "event_key": row["event_key"],
+                "from_email": from_email,
+                "from_name": from_name,
+                "is_test": True,
+            },
+            status="queued",
+        )
+    )
+    db.commit()
+    return {"ok": True, "queued_to": to_email}
