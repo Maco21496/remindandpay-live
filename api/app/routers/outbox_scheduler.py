@@ -1,7 +1,8 @@
 # app/routers/outbox_scheduler.py
 import os, time, traceback, requests
 
-BASE = os.environ.get("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+PORT = os.environ.get("APP_PORT", "8055")
+BASE = os.environ.get("APP_BASE_URL", f"http://127.0.0.1:{PORT}").rstrip("/")
 INTERVAL = int(os.environ.get("SCHED_INTERVAL_SECONDS", "60"))
 
 # Add more enqueue endpoints here as you grow (e.g., chasing)
