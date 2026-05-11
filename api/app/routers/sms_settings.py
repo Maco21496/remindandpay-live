@@ -15,7 +15,7 @@ import requests
 from ..shared import APIRouter
 from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
-from ..crypto_secrets import encrypt_secret
+from ..crypto_secrets import encrypt_secret, decrypt_secret
 from .auth import require_user
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
 
@@ -134,6 +134,27 @@ def _load_notification_triggers(db: Session) -> dict[str, dict]:
             "threshold_unit": (r.get("threshold_unit") or "").strip().lower(),
         }
     return out
+
+def _release_twilio_number(row: AccountSmsSettings) -> tuple[bool, str]:
+    if not row.twilio_subaccount_sid or not row.twilio_phone_sid:
+        return True, "no_number_to_release"
+    try:
+        master_sid, api_key_sid, api_key_secret, master_auth_token = _twilio_credentials()
+    except Exception as e:
+        return False, f"credentials_error:{e}"
+    fallback_auth = _twilio_auth_headers(master_sid, master_auth_token) if master_auth_token else None
+    primary_auth = _subaccount_primary_auth(master_sid, master_auth_token, api_key_sid, api_key_secret)
+    release_url = f"https://api.twilio.com/2010-04-01/Accounts/{row.twilio_subaccount_sid}/IncomingPhoneNumbers/{row.twilio_phone_sid}.json"
+    r = _twilio_request_with_fallback(
+        "DELETE",
+        release_url,
+        primary_auth=primary_auth,
+        fallback_auth=fallback_auth,
+        timeout=20,
+    )
+    if r.ok:
+        return True, "released"
+    return False, f"twilio_delete_failed:{r.status_code}:{(r.text or '')[:200]}"
 
 class SmsSettingsOut(BaseModel):
     enabled: bool
@@ -1054,6 +1075,27 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                         },
                         dedupe_key=f"sms_release_warning:{row.id}:{due_release_at.date().isoformat()}:{days_left}",
                     )
+                if now >= due_release_at and not bool(getattr(row, "do_not_release_number", False)):
+                    ok, release_msg = _release_twilio_number(row)
+                    if ok:
+                        row.enabled = False
+                        row.twilio_phone_number = None
+                        row.twilio_phone_sid = None
+                        row.next_number_charge_at = None
+                        row.released_at = now
+                        row.release_reason = "insufficient_credits"
+                        row.past_due_since = None
+                        _enqueue_app_notification(
+                            db,
+                            user=user,
+                            event_key="sms_number_released",
+                            context={
+                                "user_name": user.email,
+                            },
+                            dedupe_key=f"sms_number_released:{row.id}:{now.date().isoformat()}",
+                        )
+                    else:
+                        row.release_reason = release_msg
         db.add(row)
         db.commit()
         processed += 1

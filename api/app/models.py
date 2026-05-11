@@ -80,6 +80,9 @@ class AccountSmsSettings(Base):
     next_number_charge_at = Column(DateTime, nullable=True)
     past_due_since = Column(DateTime, nullable=True)
     starter_credits_granted_at = Column(DateTime, nullable=True)
+    released_at = Column(DateTime, nullable=True)
+    release_reason = Column(String(100), nullable=True)
+    do_not_release_number = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
