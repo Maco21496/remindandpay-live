@@ -19,7 +19,7 @@ from ..models import (
     User,
     StatementRun,
 )
-from ..mailer import send_statement_for_user, send_chasing_for_user
+from ..mailer import send_statement_for_user, send_chasing_for_user, send_via_postmark
 
 # ---------- logging ----------
 logging.basicConfig(
@@ -367,35 +367,60 @@ def process_once() -> int:
                     if message_sid:
                         j.provider_message_id = message_sid
                 else:
-                    # ---------- NEW: validate email settings before sending ----------
-                    if not _preflight_email_settings_or_fail(db, j):
-                        # already marked failed with clear message
-                        continue
-
                     payload = _coerce_payload(j.payload_json)
-                    log.info("Sending via Postmark… outbox_id=%s", j.id)
-
-                    # ---- call sender
-                    tmpl = (j.template or "").lower()
-                    if tmpl == "statement":
-                        res = send_statement_for_user(
-                            db=db,
-                            user_id=user.id,
-                            to_email=j.to_email,
-                            subject=j.subject,
-                            message=j.body,
-                            payload_json=payload,
-                            customer_name=cust.name if cust else None,
+                    is_app_notification = (j.template or "").startswith("app_notification:")
+                    if is_app_notification:
+                        notify_from_email = (
+                            (payload.get("from_email") if isinstance(payload, dict) else None)
+                            or os.getenv("NOTIFICATIONS_EMAIL", "")
+                        ).strip()
+                        notify_from_name = (
+                            (payload.get("from_name") if isinstance(payload, dict) else None)
+                            or os.getenv("NOTIFICATIONS_FROM_NAME", "Remind & Pay")
+                        ).strip()
+                        token = (os.getenv("POSTMARK_SERVER_TOKEN_DEFAULT", "") or "").strip()
+                        if not notify_from_email or not token:
+                            raise RuntimeError(
+                                "App notification sender misconfigured (need NOTIFICATIONS_EMAIL and POSTMARK_SERVER_TOKEN_DEFAULT)"
+                            )
+                        from_addr = f"{notify_from_name} <{notify_from_email}>"
+                        res = send_via_postmark(
+                            server_token=token,
+                            From=from_addr,
+                            To=j.to_email,
+                            Subject=j.subject or "",
+                            HtmlBody=(j.body or "").replace("\n", "<br/>"),
+                            TextBody=j.body or "",
                         )
                     else:
-                        # chasing (or any non-statement template)
-                        res = send_chasing_for_user(
-                            db=db,
-                            user_id=user.id,
-                            to_email=j.to_email,
-                            subject=j.subject or "",
-                            html_body=j.body or "",
-                        )
+                    # ---------- NEW: validate email settings before sending ----------
+                        if not _preflight_email_settings_or_fail(db, j):
+                            # already marked failed with clear message
+                            continue
+
+                        log.info("Sending via Postmark… outbox_id=%s", j.id)
+
+                        # ---- call sender
+                        tmpl = (j.template or "").lower()
+                        if tmpl == "statement":
+                            res = send_statement_for_user(
+                                db=db,
+                                user_id=user.id,
+                                to_email=j.to_email,
+                                subject=j.subject,
+                                message=j.body,
+                                payload_json=payload,
+                                customer_name=cust.name if cust else None,
+                            )
+                        else:
+                            # chasing (or any non-statement template)
+                            res = send_chasing_for_user(
+                                db=db,
+                                user_id=user.id,
+                                to_email=j.to_email,
+                                subject=j.subject or "",
+                                html_body=j.body or "",
+                            )
 
                     if not res.ok:
                         # If permanent, fail immediately (no retry)
