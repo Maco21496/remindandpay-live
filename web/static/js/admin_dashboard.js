@@ -33,6 +33,7 @@
   const notificationsTriggersRows = document.getElementById("notifications-triggers-rows");
   const notificationsTriggersMsg = document.getElementById("notifications-triggers-msg");
   const notificationsTriggersRefresh = document.getElementById("notifications-triggers-refresh");
+  const notificationsTriggersSave = document.getElementById("notifications-triggers-save");
   const notificationsLogRows = document.getElementById("notifications-log-rows");
   const notificationsLogMsg = document.getElementById("notifications-log-msg");
   const notificationsLogRefresh = document.getElementById("notifications-log-refresh");
@@ -166,17 +167,34 @@
     `;
   }
 
-  function renderNotificationTriggerRow(row) {
+  function renderSimpleTriggerRows(lowBalanceCredits, releaseWarningHours) {
     return `
-      <tr data-trigger-event="${row.event_key}">
-        <td>${esc(row.event_key)}</td>
-        <td><input type="checkbox" data-trigger-field="enabled" ${row.enabled ? "checked" : ""}></td>
-        <td><input type="text" data-trigger-field="trigger_type" value="${esc(row.trigger_type || "")}"></td>
-        <td><input type="number" step="0.01" data-trigger-field="threshold_value" value="${Number(row.threshold_value ?? 0)}"></td>
-        <td><input type="text" data-trigger-field="threshold_unit" value="${esc(row.threshold_unit || "")}"></td>
-        <td><button class="btn btn-primary" type="button" data-action="save-trigger">Save</button></td>
+      <tr data-trigger-event="sms_low_balance">
+        <td>Low balance threshold</td>
+        <td><input type="number" min="0" step="1" data-trigger-field="threshold_value" value="${Number(lowBalanceCredits ?? 200)}"></td>
+        <td>credits</td>
+      </tr>
+      <tr data-trigger-event="sms_release_warning">
+        <td>Final release warning lead time</td>
+        <td><input type="number" min="1" step="1" data-trigger-field="threshold_value" value="${Number(releaseWarningHours ?? 48)}"></td>
+        <td>hours</td>
       </tr>
     `;
+  }
+
+  async function saveNotificationTrigger(eventKey, value, unit, triggerType) {
+    const payload = {
+      enabled: 1,
+      trigger_type: triggerType,
+      threshold_value: Number(value),
+      threshold_unit: unit,
+    };
+    const response = await fetch(`/admin/notifications/triggers/${encodeURIComponent(eventKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to update trigger ${eventKey} (${response.status})`);
   }
 
   async function loadNotificationTriggers() {
@@ -188,7 +206,12 @@
       if (!response.ok) throw new Error(`Failed to load triggers (${response.status})`);
       const data = await response.json();
       const triggers = Array.isArray(data.triggers) ? data.triggers : [];
-      notificationsTriggersRows.innerHTML = triggers.map(renderNotificationTriggerRow).join("");
+      const map = new Map(triggers.map((t) => [t.event_key, t]));
+      const low = map.get("sms_low_balance");
+      const warn = map.get("sms_release_warning");
+      const lowValue = low ? Number(low.threshold_value ?? 200) : 200;
+      const warnValue = warn ? Number(warn.threshold_value ?? 48) : 48;
+      notificationsTriggersRows.innerHTML = renderSimpleTriggerRows(lowValue, warnValue);
       if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "";
     } catch (error) {
       if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Failed to load triggers.";
@@ -196,25 +219,17 @@
     }
   }
 
-  async function saveNotificationTriggerRow(rowEl) {
-    const eventKey = rowEl?.dataset?.triggerEvent;
-    if (!eventKey) return;
-    const payload = {};
-    rowEl.querySelectorAll("[data-trigger-field]").forEach((field) => {
-      const key = field.dataset.triggerField;
-      if (!key) return;
-      if (field.type === "checkbox") payload[key] = field.checked ? 1 : 0;
-      else if (field.type === "number") payload[key] = Number(field.value || 0);
-      else payload[key] = field.value;
-    });
-    if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = `Saving ${eventKey}…`;
+  async function saveSimpleTriggers() {
+    if (!notificationsTriggersRows) return;
+    const lowRow = notificationsTriggersRows.querySelector("tr[data-trigger-event='sms_low_balance']");
+    const warnRow = notificationsTriggersRows.querySelector("tr[data-trigger-event='sms_release_warning']");
+    if (!lowRow || !warnRow) return;
+    const lowVal = Number(lowRow.querySelector("[data-trigger-field='threshold_value']")?.value || 200);
+    const warnVal = Number(warnRow.querySelector("[data-trigger-field='threshold_value']")?.value || 48);
+    if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Saving trigger settings…";
     try {
-      const response = await fetch(`/admin/notifications/triggers/${encodeURIComponent(eventKey)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`Failed to update trigger (${response.status})`);
+      await saveNotificationTrigger("sms_low_balance", lowVal, "credits", "low_balance_fixed");
+      await saveNotificationTrigger("sms_release_warning", warnVal, "hours", "release_warning_hours");
       if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Trigger saved.";
     } catch (error) {
       if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Failed to save trigger.";
@@ -333,13 +348,8 @@
   if (notificationsTriggersRefresh) {
     notificationsTriggersRefresh.addEventListener("click", loadNotificationTriggers);
   }
-  if (notificationsTriggersRows) {
-    notificationsTriggersRows.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-action='save-trigger']");
-      if (!button) return;
-      const row = button.closest("tr[data-trigger-event]");
-      if (row) saveNotificationTriggerRow(row);
-    });
+  if (notificationsTriggersSave) {
+    notificationsTriggersSave.addEventListener("click", saveSimpleTriggers);
   }
   if (notificationsLogRefresh) {
     notificationsLogRefresh.addEventListener("click", loadNotificationLogs);
