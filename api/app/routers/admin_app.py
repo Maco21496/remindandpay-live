@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User
@@ -154,3 +155,56 @@ def admin_sms_webhooks(
             for log in logs
         ]
     }
+
+
+@router.get("/notifications/templates")
+def admin_notification_templates(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    rows = db.execute(
+        text(
+            """
+            SELECT id, event_key, channel, enabled, subject_template, body_template,
+                   from_email, from_name, cooldown_minutes, updated_at
+            FROM app_notification_templates
+            ORDER BY event_key ASC
+            """
+        )
+    ).mappings().all()
+    return {"templates": [dict(r) for r in rows]}
+
+
+@router.post("/notifications/templates/{template_id}")
+def admin_update_notification_template(
+    template_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    allowed = {
+        "enabled",
+        "subject_template",
+        "body_template",
+        "from_email",
+        "from_name",
+        "cooldown_minutes",
+    }
+    updates = {k: payload.get(k) for k in allowed if k in payload}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updatable fields supplied")
+
+    sets = []
+    params = {"id": template_id}
+    for key, value in updates.items():
+        sets.append(f"{key} = :{key}")
+        params[key] = value
+    sets.append("updated_at = CURRENT_TIMESTAMP")
+
+    q = f"UPDATE app_notification_templates SET {', '.join(sets)} WHERE id = :id"
+    res = db.execute(text(q), params)
+    if (res.rowcount or 0) == 0:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.commit()
+    return {"ok": True}

@@ -27,6 +27,9 @@
   const webhookEmpty = document.getElementById("sms-webhooks-empty");
   const webhookMsg = document.getElementById("sms-webhooks-msg");
   const webhookRefresh = document.getElementById("sms-webhooks-refresh");
+  const notificationsRows = document.getElementById("notifications-rows");
+  const notificationsMsg = document.getElementById("notifications-msg");
+  const notificationsRefresh = document.getElementById("notifications-refresh");
 
   async function loadPricing() {
     if (!startingCredits) return;
@@ -129,5 +132,90 @@
 
   if (activeTab === "sms-webhooks") {
     loadWebhookLogs();
+  }
+
+  function esc(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function renderNotificationRow(row) {
+    return `
+      <tr data-template-id="${row.id}">
+        <td>${esc(row.event_key)}</td>
+        <td><input type="checkbox" data-field="enabled" ${row.enabled ? "checked" : ""}></td>
+        <td><input type="number" min="0" data-field="cooldown_minutes" value="${Number(row.cooldown_minutes ?? 0)}"></td>
+        <td><input type="text" data-field="from_name" value="${esc(row.from_name || "")}"></td>
+        <td><input type="text" data-field="from_email" value="${esc(row.from_email || "")}" placeholder="(env default)"></td>
+        <td><input type="text" data-field="subject_template" value="${esc(row.subject_template || "")}"></td>
+        <td><textarea data-field="body_template" rows="3" style="min-width:260px;">${esc(row.body_template || "")}</textarea></td>
+        <td><button class="btn btn-primary" type="button" data-action="save-notification">Save</button></td>
+      </tr>
+    `;
+  }
+
+  async function loadNotifications() {
+    if (!notificationsRows) return;
+    notificationsRows.innerHTML = "";
+    if (notificationsMsg) notificationsMsg.textContent = "Loading…";
+    try {
+      const response = await fetch("/admin/notifications/templates", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Failed to load templates (${response.status})`);
+      const data = await response.json();
+      const templates = Array.isArray(data.templates) ? data.templates : [];
+      notificationsRows.innerHTML = templates.map(renderNotificationRow).join("");
+      if (notificationsMsg) notificationsMsg.textContent = "";
+    } catch (error) {
+      if (notificationsMsg) notificationsMsg.textContent = "Failed to load notification templates.";
+      console.error(error);
+    }
+  }
+
+  async function saveNotificationRow(rowEl) {
+    const id = Number(rowEl?.dataset?.templateId || 0);
+    if (!id) return;
+    const payload = {};
+    rowEl.querySelectorAll("[data-field]").forEach((field) => {
+      const key = field.dataset.field;
+      if (!key) return;
+      if (field.type === "checkbox") {
+        payload[key] = field.checked ? 1 : 0;
+      } else if (field.type === "number") {
+        payload[key] = Number(field.value || 0);
+      } else {
+        payload[key] = field.value;
+      }
+    });
+    if (notificationsMsg) notificationsMsg.textContent = `Saving ${id}…`;
+    try {
+      const response = await fetch(`/admin/notifications/templates/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Failed to update template (${response.status})`);
+      if (notificationsMsg) notificationsMsg.textContent = "Template saved.";
+    } catch (error) {
+      if (notificationsMsg) notificationsMsg.textContent = "Failed to save template.";
+      console.error(error);
+    }
+  }
+
+  if (notificationsRefresh) {
+    notificationsRefresh.addEventListener("click", loadNotifications);
+  }
+  if (notificationsRows) {
+    notificationsRows.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action='save-notification']");
+      if (!button) return;
+      const row = button.closest("tr[data-template-id]");
+      if (row) saveNotificationRow(row);
+    });
+  }
+  if (activeTab === "notifications") {
+    loadNotifications();
   }
 })();
