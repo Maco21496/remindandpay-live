@@ -116,6 +116,25 @@ def _enqueue_app_notification(
     )
     return True
 
+def _load_notification_triggers(db: Session) -> dict[str, dict]:
+    rows = db.execute(
+        text(
+            """
+            SELECT event_key, enabled, trigger_type, threshold_value, threshold_unit
+            FROM app_notification_triggers
+            """
+        )
+    ).mappings().all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out[str(r["event_key"])] = {
+            "enabled": int(r.get("enabled") or 0) == 1,
+            "trigger_type": (r.get("trigger_type") or "").strip().lower(),
+            "threshold_value": float(r.get("threshold_value") or 0),
+            "threshold_unit": (r.get("threshold_unit") or "").strip().lower(),
+        }
+    return out
+
 class SmsSettingsOut(BaseModel):
     enabled: bool
     twilio_phone_number: Optional[str] = None
@@ -896,6 +915,7 @@ def enable_sms(
 def enqueue_due_sms_billing(db: Session = Depends(get_db)):
     now = datetime.utcnow()
     pricing = _ensure_pricing(db)
+    trigger_rules = _load_notification_triggers(db)
     monthly_cost = int(pricing.sms_monthly_number_cost or 0)
     rows = (
         db.query(AccountSmsSettings)
@@ -962,9 +982,16 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                 skipped += 1
             else:
                 charged += 1
-                low_balance_threshold = monthly_cost * 2
+                low_trigger = trigger_rules.get("sms_low_balance", {})
+                low_enabled = low_trigger.get("enabled", True)
+                low_type = low_trigger.get("trigger_type") or "low_balance_multiplier"
+                low_value = float(low_trigger.get("threshold_value") or 2)
+                if low_type == "low_balance_fixed":
+                    low_balance_threshold = int(low_value)
+                else:
+                    low_balance_threshold = int(monthly_cost * (low_value if low_value > 0 else 2))
                 new_balance = _effective_credit_balance(db, row)
-                if new_balance < low_balance_threshold:
+                if low_enabled and new_balance < low_balance_threshold:
                     _enqueue_app_notification(
                         db,
                         user=user,
@@ -997,7 +1024,15 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
             if suspend_after_days > 0:
                 due_release_at = row.past_due_since + timedelta(days=suspend_after_days)
                 days_left = max(0, (due_release_at.date() - now.date()).days)
-                if days_left <= 3:
+                warning_trigger = trigger_rules.get("sms_release_warning", {})
+                warning_enabled = warning_trigger.get("enabled", True)
+                warning_type = warning_trigger.get("trigger_type") or "release_warning_hours"
+                warning_value = float(warning_trigger.get("threshold_value") or 72)
+                if warning_type == "release_warning_hours":
+                    warning_days = max(1, int(warning_value // 24))
+                else:
+                    warning_days = max(1, int(warning_value or 3))
+                if warning_enabled and days_left <= warning_days:
                     _enqueue_app_notification(
                         db,
                         user=user,
