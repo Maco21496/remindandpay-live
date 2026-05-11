@@ -294,6 +294,25 @@
         <div class="card" style="max-width: 1000px;">
           <h2>App Notifications</h2>
           <p class="form-message">Manage app-level notification templates used for SMS billing alerts.</p>
+          <h3 style="margin-top:10px;">Notification Triggers</h3>
+          <p class="form-message">Configure when specific SMS notification events should fire.</p>
+          <div class="form-actions" style="margin-bottom:10px;">
+            <button class="btn" type="button" id="notifications-triggers-refresh">Refresh triggers</button>
+            <span class="form-message" id="notifications-triggers-msg"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Enabled</th>
+                <th>Trigger Type</th>
+                <th>Threshold</th>
+                <th>Unit</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-triggers-rows"></tbody>
+          </table>
           <div class="form-actions" style="margin-bottom:10px;">
             <button class="btn" type="button" id="notifications-refresh">Refresh</button>
             <span class="form-message" id="notifications-msg"></span>

@@ -30,6 +30,9 @@
   const notificationsRows = document.getElementById("notifications-rows");
   const notificationsMsg = document.getElementById("notifications-msg");
   const notificationsRefresh = document.getElementById("notifications-refresh");
+  const notificationsTriggersRows = document.getElementById("notifications-triggers-rows");
+  const notificationsTriggersMsg = document.getElementById("notifications-triggers-msg");
+  const notificationsTriggersRefresh = document.getElementById("notifications-triggers-refresh");
   const notificationsLogRows = document.getElementById("notifications-log-rows");
   const notificationsLogMsg = document.getElementById("notifications-log-msg");
   const notificationsLogRefresh = document.getElementById("notifications-log-refresh");
@@ -163,6 +166,62 @@
     `;
   }
 
+  function renderNotificationTriggerRow(row) {
+    return `
+      <tr data-trigger-event="${row.event_key}">
+        <td>${esc(row.event_key)}</td>
+        <td><input type="checkbox" data-trigger-field="enabled" ${row.enabled ? "checked" : ""}></td>
+        <td><input type="text" data-trigger-field="trigger_type" value="${esc(row.trigger_type || "")}"></td>
+        <td><input type="number" step="0.01" data-trigger-field="threshold_value" value="${Number(row.threshold_value ?? 0)}"></td>
+        <td><input type="text" data-trigger-field="threshold_unit" value="${esc(row.threshold_unit || "")}"></td>
+        <td><button class="btn btn-primary" type="button" data-action="save-trigger">Save</button></td>
+      </tr>
+    `;
+  }
+
+  async function loadNotificationTriggers() {
+    if (!notificationsTriggersRows) return;
+    notificationsTriggersRows.innerHTML = "";
+    if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Loading…";
+    try {
+      const response = await fetch("/admin/notifications/triggers", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Failed to load triggers (${response.status})`);
+      const data = await response.json();
+      const triggers = Array.isArray(data.triggers) ? data.triggers : [];
+      notificationsTriggersRows.innerHTML = triggers.map(renderNotificationTriggerRow).join("");
+      if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "";
+    } catch (error) {
+      if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Failed to load triggers.";
+      console.error(error);
+    }
+  }
+
+  async function saveNotificationTriggerRow(rowEl) {
+    const eventKey = rowEl?.dataset?.triggerEvent;
+    if (!eventKey) return;
+    const payload = {};
+    rowEl.querySelectorAll("[data-trigger-field]").forEach((field) => {
+      const key = field.dataset.triggerField;
+      if (!key) return;
+      if (field.type === "checkbox") payload[key] = field.checked ? 1 : 0;
+      else if (field.type === "number") payload[key] = Number(field.value || 0);
+      else payload[key] = field.value;
+    });
+    if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = `Saving ${eventKey}…`;
+    try {
+      const response = await fetch(`/admin/notifications/triggers/${encodeURIComponent(eventKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Failed to update trigger (${response.status})`);
+      if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Trigger saved.";
+    } catch (error) {
+      if (notificationsTriggersMsg) notificationsTriggersMsg.textContent = "Failed to save trigger.";
+      console.error(error);
+    }
+  }
+
   async function loadNotifications() {
     if (!notificationsRows) return;
     notificationsRows.innerHTML = "";
@@ -271,10 +330,22 @@
       if (testButton) testNotificationRow(row);
     });
   }
+  if (notificationsTriggersRefresh) {
+    notificationsTriggersRefresh.addEventListener("click", loadNotificationTriggers);
+  }
+  if (notificationsTriggersRows) {
+    notificationsTriggersRows.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action='save-trigger']");
+      if (!button) return;
+      const row = button.closest("tr[data-trigger-event]");
+      if (row) saveNotificationTriggerRow(row);
+    });
+  }
   if (notificationsLogRefresh) {
     notificationsLogRefresh.addEventListener("click", loadNotificationLogs);
   }
   if (activeTab === "notifications") {
+    loadNotificationTriggers();
     loadNotifications();
     loadNotificationLogs();
   }

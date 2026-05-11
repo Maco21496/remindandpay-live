@@ -178,6 +178,50 @@ def admin_notification_templates(
     return {"templates": [dict(r) for r in rows]}
 
 
+@router.get("/notifications/triggers")
+def admin_notification_triggers(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    rows = db.execute(
+        text(
+            """
+            SELECT id, event_key, enabled, trigger_type, threshold_value, threshold_unit, updated_at
+            FROM app_notification_triggers
+            ORDER BY event_key ASC
+            """
+        )
+    ).mappings().all()
+    return {"triggers": [dict(r) for r in rows]}
+
+
+@router.post("/notifications/triggers/{event_key}")
+def admin_update_notification_trigger(
+    event_key: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    allowed = {"enabled", "trigger_type", "threshold_value", "threshold_unit"}
+    updates = {k: payload.get(k) for k in allowed if k in payload}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updatable fields supplied")
+
+    sets = []
+    params = {"event_key": event_key}
+    for key, value in updates.items():
+        sets.append(f"{key} = :{key}")
+        params[key] = value
+    sets.append("updated_at = CURRENT_TIMESTAMP")
+    q = f"UPDATE app_notification_triggers SET {', '.join(sets)} WHERE event_key = :event_key"
+    res = db.execute(text(q), params)
+    if (res.rowcount or 0) == 0:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Trigger not found")
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/notifications/templates/{template_id}")
 def admin_update_notification_template(
     template_id: int,
