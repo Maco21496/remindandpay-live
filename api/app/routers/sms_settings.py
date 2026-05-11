@@ -803,12 +803,22 @@ def enable_sms(
 
     row = _ensure_sms_settings(db, user.id)
     first_enable = row.terms_accepted_at is None
+    first_starter_credits = row.starter_credits_granted_at is None
     pricing = _ensure_pricing(db)
     snapshot = payload.pricing_snapshot or _build_pricing_snapshot(pricing)
     webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
     country = (payload.country or os.getenv("TWILIO_DEFAULT_COUNTRY", "GB") or "GB").upper()
     if not webhook_base:
         raise HTTPException(status_code=400, detail="TWILIO_WEBHOOK_BASE_URL is not configured.")
+
+    monthly_cost = int(pricing.sms_monthly_number_cost or 0)
+    if not first_starter_credits and monthly_cost > 0:
+        current_balance = _effective_credit_balance(db, row)
+        if current_balance < monthly_cost:
+            raise HTTPException(
+                status_code=400,
+                detail=f"You need at least {monthly_cost} SMS credits to enable SMS. Please top up first.",
+            )
 
     now = datetime.utcnow()
     row.enabled = True
@@ -855,11 +865,11 @@ def enable_sms(
     if first_enable:
         row.past_due_since = None
 
-    if first_enable and row.credits_balance == 0 and row.free_credits == 0:
+    if first_starter_credits and row.credits_balance == 0 and row.free_credits == 0:
         row.credits_balance = pricing.sms_starting_credits
         row.free_credits = pricing.sms_starting_credits
 
-    if first_enable:
+    if first_starter_credits:
         starter_credits = int(pricing.sms_starting_credits or 0)
         if starter_credits > 0:
             db.add(
@@ -875,7 +885,7 @@ def enable_sms(
                     },
                 )
             )
-        monthly_cost = int(pricing.sms_monthly_number_cost or 0)
+        row.starter_credits_granted_at = now
         if monthly_cost > 0:
             db.add(
                 SmsCreditLedger(

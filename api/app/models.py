@@ -79,6 +79,7 @@ class AccountSmsSettings(Base):
     sms_enabled_at = Column(DateTime, nullable=True)
     next_number_charge_at = Column(DateTime, nullable=True)
     past_due_since = Column(DateTime, nullable=True)
+    starter_credits_granted_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
