@@ -61,6 +61,7 @@ def _enqueue_app_notification(
     if not template_row or int(template_row.get("enabled") or 0) != 1:
         return False
 
+    log_id = None
     if dedupe_key:
         inserted = db.execute(
             text(
@@ -74,6 +75,18 @@ def _enqueue_app_notification(
         )
         if (inserted.rowcount or 0) == 0:
             return False
+        log_row = db.execute(
+            text(
+                """
+                SELECT id FROM app_notification_log
+                WHERE dedupe_key = :dedupe_key
+                LIMIT 1
+                """
+            ),
+            {"dedupe_key": dedupe_key},
+        ).mappings().first()
+        if log_row:
+            log_id = log_row["id"]
 
     subject = _render_template(template_row["subject_template"], context)
     body = _render_template(template_row["body_template"], context)
@@ -95,6 +108,7 @@ def _enqueue_app_notification(
                 "event_key": event_key,
                 "from_email": from_email,
                 "from_name": from_name,
+                "notification_log_id": log_id,
             },
             status="queued",
             next_attempt_at=datetime.utcnow(),

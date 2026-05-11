@@ -439,6 +439,22 @@ def process_once() -> int:
                                     run.jobs_failed = (run.jobs_failed or 0) + 1
                                     _maybe_mark_run_done(db, run)
                             db.commit()
+                            if is_app_notification and isinstance(payload, dict) and payload.get("notification_log_id"):
+                                db.execute(
+                                    text(
+                                        """
+                                        UPDATE app_notification_log
+                                        SET status = 'failed',
+                                            detail = JSON_SET(COALESCE(detail, JSON_OBJECT()), '$.error', :err)
+                                        WHERE id = :log_id
+                                        """
+                                    ),
+                                    {
+                                        "log_id": int(payload["notification_log_id"]),
+                                        "err": (getattr(res, "error", "") or "")[:500],
+                                    },
+                                )
+                                db.commit()
                             log.warning("Job %s marked failed permanently (code=%s): %s",
                                         j.id, getattr(res, "code", None), getattr(res, "error", None))
                             continue
@@ -453,6 +469,21 @@ def process_once() -> int:
                     j.provider = "postmark"
                     if res.message_id:
                         j.provider_message_id = str(res.message_id)
+                    if is_app_notification and isinstance(payload, dict) and payload.get("notification_log_id"):
+                        db.execute(
+                            text(
+                                """
+                                UPDATE app_notification_log
+                                SET status = 'sent',
+                                    detail = JSON_SET(COALESCE(detail, JSON_OBJECT()), '$.provider_message_id', :msg_id)
+                                WHERE id = :log_id
+                                """
+                            ),
+                            {
+                                "log_id": int(payload["notification_log_id"]),
+                                "msg_id": str(res.message_id or ""),
+                            },
+                        )
 
                 current_delivery = (
                     db.query(EmailOutbox.delivery_status)

@@ -1,6 +1,7 @@
 # FINAL VERSION OF api/app/routers/admin_app.py
 from typing import List
 import os
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -283,6 +284,21 @@ def admin_test_notification_template(
 
     from_email = (row.get("from_email") or os.getenv("NOTIFICATIONS_EMAIL", "")).strip() or None
     from_name = (row.get("from_name") or os.getenv("NOTIFICATIONS_FROM_NAME", "Remind & Pay")).strip()
+    dedupe_key = f"test:{row['event_key']}:{owner.id}:{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    db.execute(
+        text(
+            """
+            INSERT INTO app_notification_log (user_id, event_key, channel, dedupe_key, status, detail)
+            VALUES (:user_id, :event_key, 'email', :dedupe_key, 'queued', JSON_OBJECT('source','admin_test'))
+            """
+        ),
+        {"user_id": owner.id, "event_key": row["event_key"], "dedupe_key": dedupe_key},
+    )
+    log_row = db.execute(
+        text("SELECT id FROM app_notification_log WHERE dedupe_key = :dedupe_key LIMIT 1"),
+        {"dedupe_key": dedupe_key},
+    ).mappings().first()
+    log_id = log_row["id"] if log_row else None
 
     db.add(
         EmailOutbox(
@@ -300,6 +316,7 @@ def admin_test_notification_template(
                 "from_email": from_email,
                 "from_name": from_name,
                 "is_test": True,
+                "notification_log_id": log_id,
             },
             status="queued",
         )
