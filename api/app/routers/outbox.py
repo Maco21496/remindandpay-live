@@ -6,13 +6,29 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 
 from ..database import get_db
 from ..models import EmailOutbox, Customer
 from .auth import require_user
 
 router = APIRouter(prefix="/api/outbox", tags=["outbox"])
+
+
+def _has_outbox_server_scope(db: Session) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'email_outbox'
+              AND COLUMN_NAME = 'server_scope'
+            LIMIT 1
+            """
+        )
+    ).first()
+    return bool(row)
 
 class OutboxRow(BaseModel):
     id: int
@@ -106,8 +122,16 @@ def list_outbox(
     if channel:
         q = q.filter(o.channel == channel)
 
-    if server_scope in ("user_server", "default_server"):
+    has_server_scope = _has_outbox_server_scope(db)
+    if has_server_scope and server_scope in ("user_server", "default_server"):
         q = q.filter(o.server_scope == server_scope)
+    elif (not has_server_scope) and channel == "email":
+        # Backward-compatible fallback for environments that have not yet run
+        # the server_scope migration.
+        if server_scope == "user_server":
+            q = q.filter(~o.template.like("app_notification:%"))
+        elif server_scope == "default_server":
+            q = q.filter(o.template.like("app_notification:%"))
 
     if date_from:
         q = q.filter(func.date(o.created_at) >= date.fromisoformat(date_from))
