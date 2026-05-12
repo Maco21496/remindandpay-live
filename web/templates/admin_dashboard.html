@@ -164,6 +164,7 @@
       <nav class="nav">
         <a href="/admin/dashboard?tab=users" data-admin-tab="users" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
         <a href="/admin/dashboard?tab=sms" data-admin-tab="sms" class="{% if active_tab == 'sms' %}active{% endif %}">SMS</a>
+        <a href="/admin/dashboard?tab=notifications" data-admin-tab="notifications" class="{% if active_tab == 'notifications' %}active{% endif %}">Notifications</a>
         <a href="/admin/dashboard?tab=sms-webhooks" data-admin-tab="sms-webhooks" class="{% if active_tab == 'sms-webhooks' %}active{% endif %}">SMS Webhooks</a>
       </nav>
       <div class="owner-pill">
@@ -286,6 +287,68 @@
             </table>
             <div id="sms-webhooks-empty" class="empty" style="display:none;">No webhook logs yet.</div>
           </div>
+        </div>
+      </section>
+
+      <section class="section {% if active_tab == 'notifications' %}active{% endif %}" data-admin-section="notifications">
+        <div class="card" style="max-width: 1000px;">
+          <h2>App Notifications</h2>
+          <p class="form-message">Manage app-level notification templates used for SMS billing alerts.</p>
+          <h3 style="margin-top:10px;">Notification Triggers</h3>
+          <p class="form-message">Configure when specific SMS notification events should fire.</p>
+          <div class="form-actions" style="margin-bottom:10px;">
+            <button class="btn" type="button" id="notifications-triggers-refresh">Refresh triggers</button>
+            <span class="form-message" id="notifications-triggers-msg"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Rule</th>
+                <th>Value</th>
+                <th>Unit</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-triggers-rows"></tbody>
+          </table>
+          <div class="form-actions" style="margin-top:10px;">
+            <button class="btn btn-primary" type="button" id="notifications-triggers-save">Save trigger settings</button>
+          </div>
+          <div class="form-actions" style="margin-bottom:10px;">
+            <button class="btn" type="button" id="notifications-refresh">Refresh</button>
+            <span class="form-message" id="notifications-msg"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Enabled</th>
+                <th>Cooldown (mins)</th>
+                <th>From Name</th>
+                <th>From Email</th>
+                <th>Subject</th>
+                <th>Body</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-rows"></tbody>
+          </table>
+          <h3 style="margin-top:18px;">Notification Log</h3>
+          <div class="form-actions" style="margin-bottom:10px;">
+            <button class="btn" type="button" id="notifications-log-refresh">Refresh log</button>
+            <span class="form-message" id="notifications-log-msg"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>User</th>
+                <th>Event</th>
+                <th>Status</th>
+                <th>Dedupe</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-log-rows"></tbody>
+          </table>
         </div>
       </section>
     </main>
