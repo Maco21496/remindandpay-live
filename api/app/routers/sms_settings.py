@@ -100,6 +100,7 @@ def _enqueue_app_notification(
             invoice_id=None,
             channel="email",
             template=f"app_notification:{event_key}",
+            server_scope="default_server",
             to_email=user.email,
             subject=subject,
             body=body,

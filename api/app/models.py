@@ -474,6 +474,12 @@ class EmailOutbox(Base):
     rule_id          = Column(Integer, ForeignKey("reminder_rules.id"), nullable=True, index=True)
     run_id           = Column(Integer, ForeignKey("statement_runs.id"), nullable=True, index=True)
     provider = Column(Enum("postmark", name="email_provider"), nullable=False, default="postmark")
+    server_scope = Column(
+        Enum("user_server", "default_server", name="outbox_server_scope"),
+        nullable=False,
+        default="user_server",
+        server_default=text("'user_server'"),
+    )
     provider_message_id = Column(String(64), nullable=True, unique=True)
     delivery_status = Column(Enum("queued","sent","delivered","bounced","complained","deferred",name="delivery_status"), nullable=False, default="queued")
     delivery_detail = Column(JSON, nullable=True)

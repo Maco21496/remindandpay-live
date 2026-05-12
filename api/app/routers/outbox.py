@@ -56,6 +56,7 @@ def list_outbox(
     date_to: Optional[str] = None,
     page: int = 1,
     per_page: int = 50,
+    server_scope: str = "user_server",
     db: Session = Depends(get_db),
     user = Depends(require_user),
 ):
@@ -104,6 +105,9 @@ def list_outbox(
 
     if channel:
         q = q.filter(o.channel == channel)
+
+    if server_scope in ("user_server", "default_server"):
+        q = q.filter(o.server_scope == server_scope)
 
     if date_from:
         q = q.filter(func.date(o.created_at) >= date.fromisoformat(date_from))

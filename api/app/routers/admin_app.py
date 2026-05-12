@@ -351,6 +351,7 @@ def admin_test_notification_template(
             invoice_id=None,
             channel="email",
             template=f"app_notification:{row['event_key']}",
+            server_scope="default_server",
             to_email=to_email,
             subject=subject,
             body=body,
