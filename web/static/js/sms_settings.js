@@ -100,6 +100,21 @@
     enableModal.style.display = "none";
   }
 
+  async function readErrorDetail(response) {
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (payload && typeof payload === "object") {
+      if (typeof payload.detail === "string" && payload.detail.trim()) return payload.detail.trim();
+      if (typeof payload.message === "string" && payload.message.trim()) return payload.message.trim();
+    }
+    const text = await response.text().catch(() => "");
+    return text.trim() || `Request failed (${response.status}).`;
+  }
+
   async function loadPricing() {
     try {
       const r = await fetch("/api/sms/pricing", { cache: "no-store" });
@@ -157,8 +172,8 @@
         }),
       });
       if (!r.ok) {
-        const t = await r.text().catch(() => "");
-        throw new Error(`Enable failed ${r.status} ${t}`);
+        const detail = await readErrorDetail(r);
+        throw new Error(detail);
       }
       const data = await r.json();
       currentEnabled = Boolean(data.enabled);
@@ -169,8 +184,18 @@
       updateBalanceChip(currentEnabled, data.credits_balance);
       closeEnableModal();
       if (msg) msg.textContent = "SMS enabled.";
-    } catch {
-      if (enableMsg) enableMsg.textContent = "Enable failed.";
+    } catch (err) {
+      if (enableMsg) {
+        const detail = err?.message || "Enable failed.";
+        enableMsg.textContent = detail;
+        if (/top up|deposit|insufficient|need at least/i.test(detail)) {
+          const link = document.createElement("a");
+          link.href = "/sms_billing";
+          link.textContent = "Add SMS credits";
+          link.style.marginLeft = "8px";
+          enableMsg.appendChild(link);
+        }
+      }
       setSelectValue(enabledSel, "false");
       currentEnabled = false;
       setFieldsEnabled(false);
