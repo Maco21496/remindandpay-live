@@ -7,6 +7,47 @@
   const pageEl = document.getElementById("sms_billing_page");
   const refreshBtn = document.getElementById("sms_billing_refresh");
 
+  const topupButtons = Array.from(document.querySelectorAll("[data-topup-package]"));
+  const topupStatusEl = document.getElementById("sms_topup_status");
+
+  function setTopupLoading(loading, message = "") {
+    topupButtons.forEach((btn) => {
+      btn.disabled = loading;
+      if (loading && btn.dataset.originalText == null) {
+        btn.dataset.originalText = btn.textContent || "";
+      }
+      if (!loading && btn.dataset.originalText != null) {
+        btn.textContent = btn.dataset.originalText;
+      }
+    });
+    if (topupStatusEl) topupStatusEl.textContent = message;
+  }
+
+  async function startTopup(packageKey, button) {
+    setTopupLoading(true, "Redirecting to Stripe Checkout…");
+    if (button) button.textContent = "Loading…";
+    try {
+      const resp = await fetch("/api/billing/stripe/checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ package_key: String(packageKey) }),
+      });
+      if (!resp.ok) {
+        let message = `Top-up failed (${resp.status})`;
+        try {
+          const err = await resp.json();
+          if (err?.detail) message = String(err.detail);
+        } catch {}
+        throw new Error(message);
+      }
+      const data = await resp.json();
+      if (!data?.checkout_url) throw new Error("No checkout URL returned");
+      window.location.href = data.checkout_url;
+    } catch (err) {
+      setTopupLoading(false, err?.message || "Unable to start checkout");
+    }
+  }
+
   if (!rowsEl) return;
 
   const fmtDT = (iso) => (window.AppDate && AppDate.formatDateTime)
@@ -76,6 +117,10 @@
 
   refreshBtn?.addEventListener("click", () => {
     loadLedger();
+  });
+
+  topupButtons.forEach((btn) => {
+    btn.addEventListener("click", () => startTopup(btn.dataset.topupPackage, btn));
   });
 
   document.addEventListener("DOMContentLoaded", () => {

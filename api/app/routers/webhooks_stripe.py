@@ -2,7 +2,6 @@ import json
 import os
 from datetime import datetime, timezone
 
-import stripe
 from fastapi import Request
 
 from ..database import get_db
@@ -12,7 +11,7 @@ from .auth import require_user
 
 router = APIRouter(prefix="/api/billing/stripe", tags=["stripe_billing"])
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+_STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 _WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 _PUBLIC_BASE_URL = os.getenv("APP_BASE_URL", "https://app.remindandpay.com").rstrip("/")
 
@@ -42,10 +41,12 @@ def create_checkout_session(
     if not price_id:
         raise HTTPException(status_code=500, detail=f"Missing Stripe price ID for package {package_key}")
 
-    if not stripe.api_key:
+    if not _STRIPE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
-    session = stripe.checkout.Session.create(
+    stripe_client = _get_stripe_client()
+
+    session = stripe_client.checkout.Session.create(
         mode="payment",
         line_items=[{"price": price_id, "quantity": 1}],
         success_url=f"{_PUBLIC_BASE_URL}/sms_billing?topup=success",
@@ -72,10 +73,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Missing Stripe signature")
 
     try:
-        event = stripe.Webhook.construct_event(payload=payload, sig_header=sig_header, secret=_WEBHOOK_SECRET)
+        stripe_client = _get_stripe_client()
+        event = stripe_client.Webhook.construct_event(payload=payload, sig_header=sig_header, secret=_WEBHOOK_SECRET)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except Exception as exc:
+        if exc.__class__.__name__ != "SignatureVerificationError":
+            raise
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event.get("type")
@@ -147,3 +151,10 @@ def _credits_for_checkout_session(metadata: dict) -> int:
     if credits <= 0:
         return 0
     return credits
+
+
+def _get_stripe_client():
+    import stripe
+
+    stripe.api_key = _STRIPE_SECRET_KEY
+    return stripe
