@@ -824,7 +824,7 @@ def enable_sms(
 
     row = _ensure_sms_settings(db, user.id)
     first_enable = row.terms_accepted_at is None
-    first_starter_credits = row.starter_credits_granted_at is None
+    first_starter_credits = (row.starter_credits_granted_at is None) and first_enable
     pricing = _ensure_pricing(db)
     snapshot = payload.pricing_snapshot or _build_pricing_snapshot(pricing)
     webhook_base = (os.getenv("TWILIO_WEBHOOK_BASE_URL", "") or "").strip()
@@ -899,7 +899,7 @@ def enable_sms(
                     entry_type="credit",
                     amount=starter_credits,
                     reason="starter_pack",
-                    reference_id=f"sms_enable:{row.id}",
+                    reference_id=f"sms_enable_starter:{row.id}",
                     details={
                         "source": "sms_enable",
                         "note": "Starter credits",
@@ -914,7 +914,7 @@ def enable_sms(
                     entry_type="debit",
                     amount=monthly_cost,
                     reason="sms_number_monthly",
-                    reference_id=f"sms_enable:{row.id}",
+                    reference_id=f"sms_enable_monthly:{row.id}",
                     details={
                         "source": "sms_enable",
                         "note": "Initial monthly number charge",
