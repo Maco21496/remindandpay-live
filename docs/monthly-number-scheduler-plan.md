@@ -8,7 +8,7 @@ Implement monthly number billing that is:
 - Automated via scheduler (runs daily).
 - Safe against double-charges (idempotent reference IDs).
 
-This plan assumes the current branch already creates starter credits and the initial number fee ledger entries on enable. That logic remains the activation anchor point.
+This plan assumes the current branch already creates starter credits and the initial number-fee ledger entries on enable. That logic remains the activation anchor point.
 
 ## Proposed Schema Changes
 Add these fields to `account_sms_settings`:
