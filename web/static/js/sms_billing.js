@@ -7,6 +7,62 @@
   const pageEl = document.getElementById("sms_billing_page");
   const refreshBtn = document.getElementById("sms_billing_refresh");
 
+  const topupButtons = Array.from(document.querySelectorAll("[data-topup-package]"));
+  const topupStatusEl = document.getElementById("sms_topup_status");
+
+  function setTopupStatus(message, isError) {
+    if (!topupStatusEl) return;
+    topupStatusEl.textContent = message || "";
+    topupStatusEl.style.color = isError ? "#b42318" : "";
+  }
+
+  function setTopupLoading(loading) {
+    topupButtons.forEach((btn) => {
+      btn.disabled = loading;
+      if (loading && btn.dataset.originalText == null) {
+        btn.dataset.originalText = btn.textContent || "";
+      }
+      if (!loading && btn.dataset.originalText != null) {
+        btn.textContent = btn.dataset.originalText;
+      }
+    });
+  }
+
+  async function startTopup(packageKey, button) {
+    setTopupLoading(true);
+    setTopupStatus("Redirecting to Stripe Checkout…", false);
+    if (button) button.textContent = "Loading…";
+
+    try {
+      const resp = await fetch("/api/billing/stripe/checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ package_key: String(packageKey) }),
+      });
+
+      if (!resp.ok) {
+        let message = `Top-up failed (${resp.status})`;
+        try {
+          const err = await resp.json();
+          if (err && err.detail) message = String(err.detail);
+        } catch (e) {
+          console.warn("Could not parse top-up error payload", e);
+        }
+        throw new Error(message);
+      }
+
+      const data = await resp.json();
+      if (!data || !data.checkout_url) throw new Error("No checkout URL returned");
+
+      window.location.assign(data.checkout_url);
+    } catch (err) {
+      console.error("Top-up checkout start failed", err);
+      setTopupLoading(false);
+      setTopupStatus(err && err.message ? err.message : "Unable to start checkout", true);
+    }
+  }
+
   if (!rowsEl) return;
 
   const fmtDT = (iso) => (window.AppDate && AppDate.formatDateTime)
@@ -76,6 +132,10 @@
 
   refreshBtn?.addEventListener("click", () => {
     loadLedger();
+  });
+
+  topupButtons.forEach((btn) => {
+    btn.addEventListener("click", () => startTopup(btn.dataset.topupPackage, btn));
   });
 
   document.addEventListener("DOMContentLoaded", () => {
