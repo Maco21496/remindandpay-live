@@ -112,7 +112,7 @@ def _handle_checkout_completed(db: Session, event: dict):
     if getattr(obj, "mode", None) != "payment":
         return
 
-    metadata = dict(getattr(obj, "metadata", {}) or {})
+    metadata = _metadata_to_dict(getattr(obj, "metadata", None))
     if metadata.get("kind") != "sms_topup":
         return
 
@@ -159,7 +159,7 @@ def _handle_checkout_completed(db: Session, event: dict):
 
 def _handle_payment_intent_succeeded(db: Session, event: dict):
     obj = event["data"]["object"]
-    metadata = dict(getattr(obj, "metadata", {}) or {})
+    metadata = _metadata_to_dict(getattr(obj, "metadata", None))
     if metadata.get("kind") != "sms_topup":
         return
 
@@ -200,6 +200,23 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
         )
     )
     db.commit()
+
+
+def _metadata_to_dict(raw_metadata) -> dict:
+    if raw_metadata is None:
+        return {}
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+
+    if hasattr(raw_metadata, "to_dict"):
+        converted = raw_metadata.to_dict()
+        if isinstance(converted, dict):
+            return converted
+
+    if hasattr(raw_metadata, "items"):
+        return {str(k): v for k, v in raw_metadata.items()}
+
+    return {}
 
 
 def _credits_for_checkout_session(metadata: dict) -> int:
