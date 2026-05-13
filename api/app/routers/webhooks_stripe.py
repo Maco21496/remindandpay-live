@@ -96,7 +96,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             raise
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    event_type = event.get("type")
+    event_type = event["type"]
     if event_type == "checkout.session.completed":
         _handle_checkout_completed(db, event)
     elif event_type == "payment_intent.succeeded":
@@ -108,11 +108,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 def _handle_checkout_completed(db: Session, event: dict):
-    obj = event.get("data", {}).get("object", {})
-    if obj.get("mode") != "payment":
+    obj = event["data"]["object"]
+    if getattr(obj, "mode", None) != "payment":
         return
 
-    metadata = obj.get("metadata", {})
+    metadata = dict(getattr(obj, "metadata", {}) or {})
     if metadata.get("kind") != "sms_topup":
         return
 
@@ -129,7 +129,7 @@ def _handle_checkout_completed(db: Session, event: dict):
     if not settings:
         return
 
-    reference_id = f"stripe:checkout_session:{obj.get('id')}"
+    reference_id = f"stripe:checkout_session:{obj['id']}"
     if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
         return
 
@@ -139,29 +139,27 @@ def _handle_checkout_completed(db: Session, event: dict):
 
     db.add(
         SmsCreditLedger(
-            account_sms_settings_id=settings.id,
+            user_id=user_id,
             entry_type="credit",
             amount=amount,
             reason="stripe_topup",
             reference_id=reference_id,
-            meta_json=json.dumps(
-                {
-                    "stripe_event_id": event.get("id"),
-                    "stripe_session_id": obj.get("id"),
-                    "payment_intent_id": obj.get("payment_intent"),
-                    "source": "stripe_webhook",
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
-                    "package_key": metadata.get("package_key"),
-                }
-            ),
+            details={
+                "stripe_event_id": event["id"],
+                "stripe_session_id": obj["id"],
+                "payment_intent_id": getattr(obj, "payment_intent", None),
+                "source": "stripe_webhook",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "package_key": metadata.get("package_key"),
+            },
         )
     )
     db.commit()
 
 
 def _handle_payment_intent_succeeded(db: Session, event: dict):
-    obj = event.get("data", {}).get("object", {})
-    metadata = obj.get("metadata", {}) or {}
+    obj = event["data"]["object"]
+    metadata = dict(getattr(obj, "metadata", {}) or {})
     if metadata.get("kind") != "sms_topup":
         return
 
@@ -177,7 +175,7 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
     if not settings:
         return
 
-    reference_id = f"stripe:payment_intent:{obj.get('id')}"
+    reference_id = f"stripe:payment_intent:{obj['id']}"
     if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
         return
 
@@ -187,20 +185,18 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
 
     db.add(
         SmsCreditLedger(
-            account_sms_settings_id=settings.id,
+            user_id=user_id,
             entry_type="credit",
             amount=amount,
             reason="stripe_topup",
             reference_id=reference_id,
-            meta_json=json.dumps(
-                {
-                    "stripe_event_id": event.get("id"),
-                    "payment_intent_id": obj.get("id"),
-                    "source": "stripe_webhook_payment_intent",
-                    "processed_at": datetime.now(timezone.utc).isoformat(),
-                    "package_key": metadata.get("package_key"),
-                }
-            ),
+            details={
+                "stripe_event_id": event["id"],
+                "payment_intent_id": obj["id"],
+                "source": "stripe_webhook_payment_intent",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "package_key": metadata.get("package_key"),
+            },
         )
     )
     db.commit()
