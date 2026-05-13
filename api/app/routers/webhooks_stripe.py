@@ -89,7 +89,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         stripe_client = _get_stripe_client()
         event = stripe_client.Webhook.construct_event(payload=payload, sig_header=sig_header, secret=_WEBHOOK_SECRET)
-        event = event.to_dict_recursive()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
     except Exception as exc:
