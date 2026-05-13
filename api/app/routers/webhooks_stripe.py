@@ -57,6 +57,14 @@ def create_checkout_session(
             "kind": "sms_topup",
             "package_key": package_key,
         },
+        "payment_intent_data": {
+            "metadata": {
+                "user_id": str(user.id),
+                "credits": str(package["credits"]),
+                "kind": "sms_topup",
+                "package_key": package_key,
+            }
+        },
     }
     user_email = getattr(user, "email", None)
     if not user_email:
@@ -91,7 +99,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     event_type = event.get("type")
     if event_type == "checkout.session.completed":
         _handle_checkout_completed(db, event)
-    elif event_type in {"payment_intent.succeeded", "payment_intent.payment_failed", "charge.refunded"}:
+    elif event_type == "payment_intent.succeeded":
+        _handle_payment_intent_succeeded(db, event)
+    elif event_type in {"payment_intent.payment_failed", "charge.refunded"}:
         pass
 
     return {"ok": True}
@@ -140,6 +150,53 @@ def _handle_checkout_completed(db: Session, event: dict):
                     "stripe_session_id": obj.get("id"),
                     "payment_intent_id": obj.get("payment_intent"),
                     "source": "stripe_webhook",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "package_key": metadata.get("package_key"),
+                }
+            ),
+        )
+    )
+    db.commit()
+
+
+def _handle_payment_intent_succeeded(db: Session, event: dict):
+    obj = event.get("data", {}).get("object", {})
+    metadata = obj.get("metadata", {}) or {}
+    if metadata.get("kind") != "sms_topup":
+        return
+
+    user_id_str = metadata.get("user_id")
+    if not user_id_str:
+        return
+    try:
+        user_id = int(user_id_str)
+    except (TypeError, ValueError):
+        return
+
+    settings = db.query(AccountSmsSettings).filter(AccountSmsSettings.user_id == user_id).first()
+    if not settings:
+        return
+
+    reference_id = f"stripe:payment_intent:{obj.get('id')}"
+    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
+        return
+
+    amount = _credits_for_checkout_session(metadata)
+    if amount <= 0:
+        return
+
+    db.add(
+        SmsCreditLedger(
+            account_sms_settings_id=settings.id,
+            entry_type="credit",
+            amount=amount,
+            reason="stripe_topup",
+            reference_id=reference_id,
+            meta_json=json.dumps(
+                {
+                    "stripe_event_id": event.get("id"),
+                    "payment_intent_id": obj.get("id"),
+                    "source": "stripe_webhook_payment_intent",
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                     "package_key": metadata.get("package_key"),
                 }
