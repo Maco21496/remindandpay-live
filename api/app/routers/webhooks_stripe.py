@@ -46,18 +46,24 @@ def create_checkout_session(
 
     stripe_client = _get_stripe_client()
 
-    session = stripe_client.checkout.Session.create(
-        mode="payment",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=f"{_PUBLIC_BASE_URL}/sms_billing?topup=success",
-        cancel_url=f"{_PUBLIC_BASE_URL}/sms_billing?topup=cancelled",
-        metadata={
+    session_kwargs = {
+        "mode": "payment",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": f"{_PUBLIC_BASE_URL}/sms_billing?topup=success",
+        "cancel_url": f"{_PUBLIC_BASE_URL}/sms_billing?topup=cancelled",
+        "metadata": {
             "user_id": str(user.id),
             "credits": str(package["credits"]),
             "kind": "sms_topup",
             "package_key": package_key,
         },
-    )
+    }
+    user_email = getattr(user, "email", None)
+    if not user_email:
+        raise HTTPException(status_code=400, detail="Logged-in user is missing an email address")
+    session_kwargs["customer_email"] = user_email
+
+    session = stripe_client.checkout.Session.create(**session_kwargs)
 
     return {"checkout_url": session.url, "session_id": session.id}
 
