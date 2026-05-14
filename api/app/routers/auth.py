@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
+from ..services.billing_trial import ensure_billing_profile
 from ..models import User, VerificationToken
 from ..shared import templates
 from ..security import verify_password, hash_password
@@ -200,6 +201,8 @@ def verify_email(request: Request, token: str, next: str = "/dashboard", db: Ses
     db.commit()
 
     run_initial_user_setup(db, user.id, seed_templates=True)
+    ensure_billing_profile(db, user)
+    db.commit()
 
     return templates.TemplateResponse(
         "auth/auth_verify_done.html",
