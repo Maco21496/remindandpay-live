@@ -224,13 +224,16 @@ def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_use
 
     now = datetime.utcnow()
     days_left = max(0, (profile.trial_ends_at.date() - now.date()).days) if profile.trial_ends_at else 0
+    effective_status = profile.subscription_status
+    if effective_status == "trialing" and profile.trial_ends_at and profile.trial_ends_at < now:
+        effective_status = "trial_expired"
 
     return {
         "trial_days_assigned": profile.trial_days_assigned,
         "trial_started_at": profile.trial_started_at.isoformat() if profile.trial_started_at else None,
         "trial_ends_at": profile.trial_ends_at.isoformat() if profile.trial_ends_at else None,
         "trial_days_left": days_left,
-        "subscription_status": profile.subscription_status,
+        "subscription_status": effective_status,
         "stripe_customer_id": profile.stripe_customer_id,
         "stripe_subscription_id": profile.stripe_subscription_id,
     }
