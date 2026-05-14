@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile
+from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
 from ..shared import templates
 from .auth import require_owner
@@ -464,3 +465,12 @@ def admin_update_user_billing_profile(
 
     db.commit()
     return {"ok": True}
+
+
+@router.post("/billing/notifications/enqueue")
+def admin_enqueue_billing_trial_notifications(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    result = enqueue_trial_notifications(db)
+    return {"ok": True, **result}
