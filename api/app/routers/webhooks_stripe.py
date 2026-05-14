@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import Request
 
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger
+from ..models import AccountSmsSettings, SmsCreditLedger, AccountBillingProfile
 from ..shared import APIRouter, BaseModel, Depends, HTTPException, Session
 from .auth import require_user
 
@@ -131,8 +131,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     event_type = event["type"]
     if event_type == "checkout.session.completed":
         _handle_checkout_completed(db, event)
+        _handle_subscription_checkout_completed(db, event)
     elif event_type == "payment_intent.succeeded":
         _handle_payment_intent_succeeded(db, event)
+    elif event_type == "customer.subscription.updated":
+        _handle_subscription_updated(db, event)
+    elif event_type == "customer.subscription.deleted":
+        _handle_subscription_deleted(db, event)
+    elif event_type == "invoice.paid":
+        _handle_invoice_paid(db, event)
+    elif event_type == "invoice.payment_failed":
+        _handle_invoice_payment_failed(db, event)
     elif event_type in {"payment_intent.payment_failed", "charge.refunded"}:
         pass
 
@@ -231,6 +240,96 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
             },
         )
     )
+    db.commit()
+
+
+def _find_billing_profile(db: Session, *, user_id: int | None = None, stripe_customer_id: str | None = None, stripe_subscription_id: str | None = None):
+    q = db.query(AccountBillingProfile)
+    if user_id is not None:
+        row = q.filter(AccountBillingProfile.user_id == user_id).first()
+        if row:
+            return row
+    if stripe_subscription_id:
+        row = q.filter(AccountBillingProfile.stripe_subscription_id == stripe_subscription_id).first()
+        if row:
+            return row
+    if stripe_customer_id:
+        return q.filter(AccountBillingProfile.stripe_customer_id == stripe_customer_id).first()
+    return None
+
+
+def _handle_subscription_checkout_completed(db: Session, event: dict):
+    obj = event["data"]["object"]
+    if getattr(obj, "mode", None) != "subscription":
+        return
+    metadata = _metadata_to_dict(getattr(obj, "metadata", None))
+    if metadata.get("kind") != "membership_subscription":
+        return
+    try:
+        user_id = int(metadata.get("user_id"))
+    except (TypeError, ValueError):
+        return
+
+    profile = _find_billing_profile(db, user_id=user_id)
+    if not profile:
+        return
+
+    profile.subscription_status = "active"
+    profile.stripe_customer_id = str(getattr(obj, "customer", "") or "") or profile.stripe_customer_id
+    profile.stripe_subscription_id = str(getattr(obj, "subscription", "") or "") or profile.stripe_subscription_id
+    db.add(profile)
+    db.commit()
+
+
+def _handle_subscription_updated(db: Session, event: dict):
+    obj = event["data"]["object"]
+    status = str(getattr(obj, "status", "") or "")
+    stripe_subscription_id = str(getattr(obj, "id", "") or "")
+    stripe_customer_id = str(getattr(obj, "customer", "") or "")
+
+    profile = _find_billing_profile(db, stripe_subscription_id=stripe_subscription_id, stripe_customer_id=stripe_customer_id)
+    if not profile:
+        return
+    profile.subscription_status = status or profile.subscription_status
+    profile.stripe_subscription_id = stripe_subscription_id or profile.stripe_subscription_id
+    profile.stripe_customer_id = stripe_customer_id or profile.stripe_customer_id
+    db.add(profile)
+    db.commit()
+
+
+def _handle_subscription_deleted(db: Session, event: dict):
+    obj = event["data"]["object"]
+    stripe_subscription_id = str(getattr(obj, "id", "") or "")
+    stripe_customer_id = str(getattr(obj, "customer", "") or "")
+    profile = _find_billing_profile(db, stripe_subscription_id=stripe_subscription_id, stripe_customer_id=stripe_customer_id)
+    if not profile:
+        return
+    profile.subscription_status = "canceled"
+    db.add(profile)
+    db.commit()
+
+
+def _handle_invoice_paid(db: Session, event: dict):
+    obj = event["data"]["object"]
+    stripe_subscription_id = str(getattr(obj, "subscription", "") or "")
+    stripe_customer_id = str(getattr(obj, "customer", "") or "")
+    profile = _find_billing_profile(db, stripe_subscription_id=stripe_subscription_id, stripe_customer_id=stripe_customer_id)
+    if not profile:
+        return
+    profile.subscription_status = "active"
+    db.add(profile)
+    db.commit()
+
+
+def _handle_invoice_payment_failed(db: Session, event: dict):
+    obj = event["data"]["object"]
+    stripe_subscription_id = str(getattr(obj, "subscription", "") or "")
+    stripe_customer_id = str(getattr(obj, "customer", "") or "")
+    profile = _find_billing_profile(db, stripe_subscription_id=stripe_subscription_id, stripe_customer_id=stripe_customer_id)
+    if not profile:
+        return
+    profile.subscription_status = "past_due"
+    db.add(profile)
     db.commit()
 
 
