@@ -1,9 +1,9 @@
-﻿# app/routers/settings.py
+# app/routers/settings.py
 from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional, List
-from datetime import time as dtime
+from datetime import time as dtime, datetime
 from sqlalchemy.orm import Session
 
 from fastapi import Depends, UploadFile, File
@@ -12,9 +12,10 @@ from zoneinfo import available_timezones
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AppSettings
+from ..models import AppSettings, AccountBillingProfile
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
+from ..services.billing_trial import ensure_billing_profile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -210,6 +211,29 @@ def delete_logo(db=Depends(get_db), user=Depends(require_user)):
     s.org_logo_url = None
     db.add(s); db.commit()
     return {"ok": True}
+
+
+
+@router.get("/billing")
+def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_user)):
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
+    if not profile:
+        profile = ensure_billing_profile(db, user)
+        db.commit()
+        db.refresh(profile)
+
+    now = datetime.utcnow()
+    days_left = max(0, (profile.trial_ends_at.date() - now.date()).days) if profile.trial_ends_at else 0
+
+    return {
+        "trial_days_assigned": profile.trial_days_assigned,
+        "trial_started_at": profile.trial_started_at.isoformat() if profile.trial_started_at else None,
+        "trial_ends_at": profile.trial_ends_at.isoformat() if profile.trial_ends_at else None,
+        "trial_days_left": days_left,
+        "subscription_status": profile.subscription_status,
+        "stripe_customer_id": profile.stripe_customer_id,
+        "stripe_subscription_id": profile.stripe_subscription_id,
+    }
 
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):
