@@ -1,7 +1,7 @@
 # FINAL VERSION OF api/app/routers/admin_app.py
 from typing import List
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..database import get_db
-from ..models import SmsWebhookLog, User
+from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile
 from ..models import EmailOutbox
 from ..shared import templates
 from .auth import require_owner
@@ -368,3 +368,99 @@ def admin_test_notification_template(
     )
     db.commit()
     return {"ok": True, "queued_to": to_email}
+
+
+@router.get("/billing/settings")
+def admin_get_billing_settings(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(BillingSettings).order_by(BillingSettings.id.asc()).first()
+    if not row:
+        row = BillingSettings(default_trial_days=30)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return {
+        "default_trial_days": int(row.default_trial_days or 30),
+        "updated_by_user_id": row.updated_by_user_id,
+        "updated_at": row.updated_at,
+    }
+
+
+@router.post("/billing/settings")
+def admin_update_billing_settings(
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    default_trial_days = payload.get("default_trial_days")
+    if default_trial_days is None:
+        raise HTTPException(status_code=400, detail="default_trial_days is required")
+    try:
+        default_trial_days = int(default_trial_days)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="default_trial_days must be an integer")
+    if default_trial_days < 0:
+        raise HTTPException(status_code=400, detail="default_trial_days must be >= 0")
+
+    row = db.query(BillingSettings).order_by(BillingSettings.id.asc()).first()
+    if not row:
+        row = BillingSettings(default_trial_days=default_trial_days, updated_by_user_id=owner.id)
+        db.add(row)
+    else:
+        row.default_trial_days = default_trial_days
+        row.updated_by_user_id = owner.id
+    db.commit()
+    return {"ok": True, "default_trial_days": default_trial_days}
+
+
+@router.get("/billing/users/{user_id}")
+def admin_get_user_billing_profile(
+    user_id: int,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Billing profile not found")
+    return {
+        "user_id": row.user_id,
+        "trial_days_assigned": row.trial_days_assigned,
+        "trial_started_at": row.trial_started_at,
+        "trial_ends_at": row.trial_ends_at,
+        "subscription_status": row.subscription_status,
+        "stripe_customer_id": row.stripe_customer_id,
+        "stripe_subscription_id": row.stripe_subscription_id,
+    }
+
+
+@router.post("/billing/users/{user_id}")
+def admin_update_user_billing_profile(
+    user_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Billing profile not found")
+
+    if "trial_days_assigned" in payload:
+        try:
+            trial_days = int(payload.get("trial_days_assigned"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="trial_days_assigned must be an integer")
+        if trial_days < 0:
+            raise HTTPException(status_code=400, detail="trial_days_assigned must be >= 0")
+        row.trial_days_assigned = trial_days
+        row.trial_ends_at = row.trial_started_at + timedelta(days=trial_days)
+
+    if "trial_ends_at" in payload and payload.get("trial_ends_at"):
+        row.trial_ends_at = datetime.fromisoformat(str(payload.get("trial_ends_at")))
+
+    if "subscription_status" in payload and payload.get("subscription_status"):
+        row.subscription_status = str(payload.get("subscription_status"))
+
+    db.commit()
+    return {"ok": True}
