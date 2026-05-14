@@ -288,7 +288,7 @@
         <h3 style="margin:0 0 8px 0; font-size:16px;">Membership</h3>
         <div class="muted">Subscription status: <strong id="billing_subscription_status">-</strong></div>
         <div class="field-row" style="margin-top:10px; gap:8px;">
-          <button class="btn" disabled>Standard membership (£29/month) - coming next phase</button>
+          <button id="billing_subscribe_btn" class="btn">Start Standard membership (£29/month)</button>
         </div>
       </div>
 
@@ -392,6 +392,16 @@
       }
     }
 
+
+    if (window.location.hash === '#billing') {
+      const billingTab = tabs.querySelector('.tab[data-tab="billing"]');
+      if (billingTab) {
+        tabs.querySelectorAll('.tab').forEach(t=>t.classList.remove('is-active'));
+        billingTab.classList.add('is-active');
+        showOnly('billing');
+        window.dispatchEvent(new Event('billing_settings_tab_activated'));
+      }
+    }
     tabs.addEventListener('click', (e)=>{
       const btn = e.target.closest('.tab');
       if (!btn) return;

@@ -4,6 +4,29 @@
   const trialLeftEl = document.getElementById('billing_trial_days_left');
   const subStatusEl = document.getElementById('billing_subscription_status');
   const msgEl = document.getElementById('billing_msg');
+  const subscribeBtn = document.getElementById('billing_subscribe_btn');
+
+
+  async function startSubscription() {
+    if (msgEl) msgEl.textContent = 'Redirecting to Stripe…';
+    if (subscribeBtn) subscribeBtn.disabled = true;
+    try {
+      const r = await fetch('/api/billing/stripe/subscription-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        throw new Error(`Failed (${r.status}) ${txt}`);
+      }
+      const data = await r.json();
+      if (!data || !data.checkout_url) throw new Error('No checkout URL returned');
+      window.location.assign(data.checkout_url);
+    } catch (err) {
+      if (msgEl) msgEl.textContent = 'Unable to start subscription checkout';
+      if (subscribeBtn) subscribeBtn.disabled = false;
+    }
+  }
 
   async function loadBilling() {
     if (!trialDaysEl) return;
@@ -23,5 +46,6 @@
     }
   }
 
+  subscribeBtn?.addEventListener('click', startSubscription);
   window.addEventListener('billing_settings_tab_activated', loadBilling);
 })();

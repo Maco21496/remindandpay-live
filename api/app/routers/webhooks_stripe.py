@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/billing/stripe", tags=["stripe_billing"])
 _STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 _WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 _PUBLIC_BASE_URL = os.getenv("APP_BASE_URL", "https://app.remindandpay.com").rstrip("/")
+_SUBSCRIPTION_PRICE_ID = os.getenv("STRIPE_STARTER_SUBSCRIPTION_PRICE_ID", "")
 
 _TOPUP_PACKAGES = {
     "10": {"price_id": os.getenv("STRIPE_SMS_TOPUP_10_PRICE_ID", ""), "credits": 1000},
@@ -73,6 +74,37 @@ def create_checkout_session(
 
     session = stripe_client.checkout.Session.create(**session_kwargs)
 
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@router.post("/subscription-checkout-session")
+def create_subscription_checkout_session(
+    user=Depends(require_user),
+):
+    if not _STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
+    if not _SUBSCRIPTION_PRICE_ID:
+        raise HTTPException(status_code=500, detail="STRIPE_STARTER_SUBSCRIPTION_PRICE_ID is not configured")
+
+    stripe_client = _get_stripe_client()
+
+    session = stripe_client.checkout.Session.create(
+        mode="subscription",
+        line_items=[{"price": _SUBSCRIPTION_PRICE_ID, "quantity": 1}],
+        success_url=f"{_PUBLIC_BASE_URL}/settings#billing",
+        cancel_url=f"{_PUBLIC_BASE_URL}/settings#billing",
+        metadata={
+            "user_id": str(user.id),
+            "kind": "membership_subscription",
+        },
+        subscription_data={
+            "metadata": {
+                "user_id": str(user.id),
+                "kind": "membership_subscription",
+            }
+        },
+        customer_email=user.email,
+    )
     return {"checkout_url": session.url, "session_id": session.id}
 
 
