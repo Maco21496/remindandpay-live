@@ -38,3 +38,19 @@ def ensure_billing_profile(db: Session, user: User) -> AccountBillingProfile:
     db.add(row)
     db.flush()
     return row
+
+
+
+def assert_billing_allows_sending(db: Session, user: User) -> None:
+    profile = ensure_billing_profile(db, user)
+    now = datetime.utcnow()
+    status = (profile.subscription_status or "").strip().lower()
+
+    if status == "active":
+        return
+
+    in_trial = bool(profile.trial_ends_at and profile.trial_ends_at >= now)
+    if status in {"trialing", "none", "trial_expired"} and in_trial:
+        return
+
+    raise ValueError("Trial expired. Please activate membership in Settings → Billing to enable sending.")
