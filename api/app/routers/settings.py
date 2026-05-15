@@ -298,10 +298,15 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         rows.append(_stripe_invoice_to_row(inv, kind=kind))
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
+    processed_ledger_topup_keys = set()
     for entry in ledger_topups:
         details = entry.details if isinstance(entry.details, dict) else {}
         pi = str(details.get("payment_intent_id") or "").strip()
         session_id = str(details.get("stripe_session_id") or "").strip()
+        dedupe_key = (pi or "", session_id or "")
+        if dedupe_key in processed_ledger_topup_keys:
+            continue
+        processed_ledger_topup_keys.add(dedupe_key)
         if (pi and pi in seen_topup_payment_intents) or (session_id and session_id in seen_topup_checkout_sessions):
             continue
 
@@ -372,7 +377,7 @@ def _find_stripe_invoice_for_topup(
     if payment_intent_id:
         try:
             pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
-            invoice_id = str(getattr(pi, "invoice", "") or "").strip()
+            invoice_id = _stripe_obj_id(getattr(pi, "invoice", None))
             if invoice_id:
                 return stripe_client.Invoice.retrieve(invoice_id)
         except Exception:
@@ -393,6 +398,16 @@ def _find_stripe_invoice_for_topup(
         if checkout_session_id and inv_session == checkout_session_id:
             return inv
     return None
+
+
+def _stripe_obj_id(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(value.get("id") or "").strip()
+    return str(getattr(value, "id", "") or "").strip()
 
 
 def _ledger_topup_money_from_details(details: dict) -> tuple[str | None, int | None]:
