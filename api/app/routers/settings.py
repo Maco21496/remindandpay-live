@@ -254,14 +254,30 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
     rows = []
-    ledger_topups = (
+    ledger_topups_raw = (
         db.query(SmsCreditLedger)
         .filter(SmsCreditLedger.user_id == user.id)
         .filter(SmsCreditLedger.reason == "stripe_topup")
         .order_by(SmsCreditLedger.created_at.desc())
-        .limit(limit)
+        .limit(limit * 3)
         .all()
     )
+
+    # Collapse duplicate ledger rows for the same topup (e.g. legacy + new reference formats).
+    ledger_topups = []
+    seen_ledger_keys = set()
+    for entry in ledger_topups_raw:
+        details = entry.details if isinstance(entry.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "").strip()
+        session_id = str(details.get("stripe_session_id") or "").strip()
+        dedupe_key = f"pi:{pi}" if pi else (f"cs:{session_id}" if session_id else f"ref:{entry.reference_id or entry.id}")
+        if dedupe_key in seen_ledger_keys:
+            continue
+        seen_ledger_keys.add(dedupe_key)
+        ledger_topups.append(entry)
+        if len(ledger_topups) >= limit:
+            break
+
     topup_payment_intents = set()
     topup_checkout_sessions = set()
     for entry in ledger_topups:
@@ -298,15 +314,10 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         rows.append(_stripe_invoice_to_row(inv, kind=kind))
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
-    processed_ledger_topup_keys = set()
     for entry in ledger_topups:
         details = entry.details if isinstance(entry.details, dict) else {}
         pi = str(details.get("payment_intent_id") or "").strip()
         session_id = str(details.get("stripe_session_id") or "").strip()
-        dedupe_key = (pi or "", session_id or "")
-        if dedupe_key in processed_ledger_topup_keys:
-            continue
-        processed_ledger_topup_keys.add(dedupe_key)
         if (pi and pi in seen_topup_payment_intents) or (session_id and session_id in seen_topup_checkout_sessions):
             continue
 
@@ -378,6 +389,11 @@ def _find_stripe_invoice_for_topup(
         try:
             pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
             invoice_id = _stripe_obj_id(getattr(pi, "invoice", None))
+            if not invoice_id:
+                latest_charge_id = _stripe_obj_id(getattr(pi, "latest_charge", None))
+                if latest_charge_id:
+                    charge = stripe_client.Charge.retrieve(latest_charge_id)
+                    invoice_id = _stripe_obj_id(getattr(charge, "invoice", None))
             if invoice_id:
                 return stripe_client.Invoice.retrieve(invoice_id)
         except Exception:
