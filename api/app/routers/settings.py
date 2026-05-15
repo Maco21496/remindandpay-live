@@ -254,14 +254,33 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
     rows = []
+    ledger_topups = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .order_by(SmsCreditLedger.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    topup_payment_intents = set()
+    for entry in ledger_topups:
+        details = entry.details if isinstance(entry.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "").strip()
+        if pi:
+            topup_payment_intents.add(pi)
+
     seen_topup_payment_intents = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
-        kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
-        payment_intent_id = metadata.get("payment_intent_id")
+        invoice_pi = str(getattr(inv, "payment_intent", "") or "").strip()
+        metadata_pi = str(metadata.get("payment_intent_id") or "").strip()
+        payment_intent_id = invoice_pi or metadata_pi
+
+        is_topup = (metadata.get("kind") == "sms_topup") or (payment_intent_id in topup_payment_intents)
+        kind = "membership" if inv_sub else ("topup" if is_topup else "other")
         if payment_intent_id and kind == "topup":
-            seen_topup_payment_intents.add(str(payment_intent_id))
+            seen_topup_payment_intents.add(payment_intent_id)
 
         rows.append({
             "id": inv.id,
@@ -277,27 +296,20 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         })
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
-    ledger_topups = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.user_id == user.id)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .order_by(SmsCreditLedger.created_at.desc())
-        .limit(limit)
-        .all()
-    )
     for entry in ledger_topups:
         details = entry.details if isinstance(entry.details, dict) else {}
         pi = str(details.get("payment_intent_id") or "")
         if pi and pi in seen_topup_payment_intents:
             continue
         created_ts = int(entry.created_at.timestamp()) if entry.created_at else None
+        currency, amount_paid = _ledger_topup_money_from_details(details)
         rows.append({
             "id": entry.reference_id or f"ledger:{entry.id}",
             "number": None,
             "status": "paid",
-            "currency": None,
-            "amount_due": None,
-            "amount_paid": None,
+            "currency": currency,
+            "amount_due": amount_paid,
+            "amount_paid": amount_paid,
             "created": created_ts,
             "hosted_invoice_url": None,
             "invoice_pdf": None,
@@ -317,6 +329,15 @@ def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)
     )
     return {"ok": True, "stats": stats}
 
+
+
+def _ledger_topup_money_from_details(details: dict) -> tuple[str | None, int | None]:
+    package_key = str((details or {}).get("package_key") or "").strip()
+    if package_key.isdigit():
+        # Current topup packages are keyed by GBP amount (e.g. "10", "25").
+        pounds = int(package_key)
+        return "GBP", pounds * 100
+    return None, None
 
 
 def _get_stripe_client():
