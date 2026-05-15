@@ -12,7 +12,7 @@ from zoneinfo import available_timezones
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AppSettings, AccountBillingProfile
+from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
@@ -254,10 +254,15 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
     rows = []
+    seen_topup_payment_intents = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
         kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
+        payment_intent_id = metadata.get("payment_intent_id")
+        if payment_intent_id and kind == "topup":
+            seen_topup_payment_intents.add(str(payment_intent_id))
+
         rows.append({
             "id": inv.id,
             "number": getattr(inv, "number", None),
@@ -270,7 +275,37 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
             "invoice_pdf": getattr(inv, "invoice_pdf", None),
             "kind": kind,
         })
-    return {"invoices": rows}
+
+    # Backfill existing topups processed before invoice_creation was enabled in Checkout.
+    ledger_topups = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .order_by(SmsCreditLedger.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    for entry in ledger_topups:
+        details = entry.details if isinstance(entry.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "")
+        if pi and pi in seen_topup_payment_intents:
+            continue
+        created_ts = int(entry.created_at.timestamp()) if entry.created_at else None
+        rows.append({
+            "id": entry.reference_id or f"ledger:{entry.id}",
+            "number": None,
+            "status": "paid",
+            "currency": None,
+            "amount_due": None,
+            "amount_paid": None,
+            "created": created_ts,
+            "hosted_invoice_url": None,
+            "invoice_pdf": None,
+            "kind": "topup",
+        })
+
+    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+    return {"invoices": rows[:limit]}
 
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):

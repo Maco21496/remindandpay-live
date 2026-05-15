@@ -47,24 +47,27 @@ def create_checkout_session(
 
     stripe_client = _get_stripe_client()
 
+    topup_metadata = {
+        "user_id": str(user.id),
+        "credits": str(package["credits"]),
+        "kind": "sms_topup",
+        "package_key": package_key,
+    }
+
     session_kwargs = {
         "mode": "payment",
         "line_items": [{"price": price_id, "quantity": 1}],
         "success_url": f"{_PUBLIC_BASE_URL}/sms_billing?topup=success",
         "cancel_url": f"{_PUBLIC_BASE_URL}/sms_billing?topup=cancelled",
-        "metadata": {
-            "user_id": str(user.id),
-            "credits": str(package["credits"]),
-            "kind": "sms_topup",
-            "package_key": package_key,
-        },
-        "payment_intent_data": {
-            "metadata": {
-                "user_id": str(user.id),
-                "credits": str(package["credits"]),
-                "kind": "sms_topup",
-                "package_key": package_key,
-            }
+        "metadata": topup_metadata,
+        "payment_intent_data": {"metadata": topup_metadata},
+        # Ensure one-off topups generate Stripe invoices so they appear in the billing history UI.
+        "invoice_creation": {
+            "enabled": True,
+            "invoice_data": {
+                "metadata": topup_metadata,
+                "description": f"SMS credit top-up ({package['credits']} credits)",
+            },
         },
     }
     user_email = getattr(user, "email", None)
