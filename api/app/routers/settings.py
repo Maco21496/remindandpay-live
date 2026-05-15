@@ -244,7 +244,6 @@ def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_use
 
 @router.get("/billing/invoices")
 def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=Depends(require_user)):
-    billing_debug = os.getenv("BILLING_DEBUG_INVOICES", "").strip().lower() in {"1", "true", "yes", "on"}
     profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
     if not profile or not profile.stripe_customer_id:
         return {"invoices": []}
@@ -257,123 +256,15 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
     rows = []
-    ledger_topups_raw = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.user_id == user.id)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .order_by(SmsCreditLedger.created_at.desc())
-        .limit(limit * 3)
-        .all()
-    )
-
-    # Collapse duplicate ledger rows for the same topup (e.g. legacy + new reference formats).
-    ledger_topups = []
-    seen_ledger_keys = set()
-    for entry in ledger_topups_raw:
-        details = entry.details if isinstance(entry.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "").strip()
-        session_id = str(details.get("stripe_session_id") or "").strip()
-        dedupe_key = f"pi:{pi}" if pi else (f"cs:{session_id}" if session_id else f"ref:{entry.reference_id or entry.id}")
-        if dedupe_key in seen_ledger_keys:
-            continue
-        seen_ledger_keys.add(dedupe_key)
-        ledger_topups.append(entry)
-        if len(ledger_topups) >= limit:
-            break
-
-    topup_payment_intents = set()
-    topup_checkout_sessions = set()
-    for entry in ledger_topups:
-        details = entry.details if isinstance(entry.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "").strip()
-        if pi:
-            topup_payment_intents.add(pi)
-        session_id = str(details.get("stripe_session_id") or "").strip()
-        if session_id:
-            topup_checkout_sessions.add(session_id)
-        if billing_debug:
-            logger.info("billing_debug ledger_topup user_id=%s ledger_id=%s pi=%s session_id=%s ref=%s", user.id, entry.id, pi, session_id, entry.reference_id)
-
-    seen_topup_payment_intents = set()
-    seen_topup_checkout_sessions = set()
-    seen_stripe_invoice_ids = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
-        if billing_debug:
-            logger.info("billing_debug stripe_invoice_list user_id=%s invoice_id=%s customer=%s payment_intent=%s metadata_kind=%s metadata_session=%s has_pdf=%s", user.id, getattr(inv, "id", None), getattr(inv, "customer", None), getattr(inv, "payment_intent", None), metadata.get("kind"), metadata.get("stripe_session_id"), bool(getattr(inv, "invoice_pdf", None)))
         inv_sub = getattr(inv, "subscription", None)
-        invoice_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        metadata_pi = str(metadata.get("payment_intent_id") or "").strip()
-        payment_intent_id = invoice_pi or metadata_pi
-
-        metadata_session_id = str(metadata.get("stripe_session_id") or "").strip()
-        is_topup = (
-            (metadata.get("kind") == "sms_topup")
-            or (payment_intent_id in topup_payment_intents)
-            or (metadata_session_id in topup_checkout_sessions)
-        )
-        kind = "membership" if inv_sub else ("topup" if is_topup else "other")
-        if kind == "topup":
-            if payment_intent_id:
-                seen_topup_payment_intents.add(payment_intent_id)
-            if metadata_session_id:
-                seen_topup_checkout_sessions.add(metadata_session_id)
-
-        inv_id = str(getattr(inv, "id", "") or "").strip()
-        if inv_id:
-            seen_stripe_invoice_ids.add(inv_id)
+        kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
         rows.append(_stripe_invoice_to_row(inv, kind=kind))
-
-    # Backfill existing topups processed before invoice_creation was enabled in Checkout.
-    for entry in ledger_topups:
-        details = entry.details if isinstance(entry.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "").strip()
-        session_id = str(details.get("stripe_session_id") or "").strip()
-        if (pi and pi in seen_topup_payment_intents) or (session_id and session_id in seen_topup_checkout_sessions):
-            continue
-
-        stripe_invoice = _find_stripe_invoice_for_topup(
-            stripe_client,
-            customer_id=profile.stripe_customer_id,
-            payment_intent_id=pi,
-            checkout_session_id=session_id,
-            billing_debug=billing_debug,
-            debug_user_id=user.id,
-        )
-        if stripe_invoice:
-            stripe_invoice_id = str(getattr(stripe_invoice, "id", "") or "").strip()
-            if stripe_invoice_id and stripe_invoice_id in seen_stripe_invoice_ids:
-                if pi:
-                    seen_topup_payment_intents.add(pi)
-                if session_id:
-                    seen_topup_checkout_sessions.add(session_id)
-                continue
-            rows.append(_stripe_invoice_to_row(stripe_invoice, kind="topup"))
-            if stripe_invoice_id:
-                seen_stripe_invoice_ids.add(stripe_invoice_id)
-            if pi:
-                seen_topup_payment_intents.add(pi)
-            if session_id:
-                seen_topup_checkout_sessions.add(session_id)
-            continue
-
-        created_ts = int(entry.created_at.timestamp()) if entry.created_at else None
-        currency, amount_paid = _ledger_topup_money_from_details(details)
-        rows.append({
-            "id": entry.reference_id or f"ledger:{entry.id}",
-            "number": None,
-            "status": "paid",
-            "currency": currency,
-            "amount_due": amount_paid,
-            "amount_paid": amount_paid,
-            "created": created_ts,
-            "hosted_invoice_url": None,
-            "invoice_pdf": None,
-            "kind": "topup",
-        })
 
     rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return {"invoices": rows[:limit]}
+
 
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):
@@ -400,76 +291,6 @@ def _stripe_invoice_to_row(inv, *, kind: str) -> dict:
         "invoice_pdf": getattr(inv, "invoice_pdf", None),
         "kind": kind,
     }
-
-
-def _find_stripe_invoice_for_topup(
-    stripe_client,
-    *,
-    customer_id: str,
-    payment_intent_id: str,
-    checkout_session_id: str,
-    billing_debug: bool = False,
-    debug_user_id: int | None = None,
-):
-    # First try direct PI->invoice lookup (works even if invoice is on another Stripe customer).
-    if payment_intent_id:
-        try:
-            pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
-            invoice_id = _stripe_obj_id(getattr(pi, "invoice", None))
-            if billing_debug:
-                logger.info("billing_debug pi_lookup user_id=%s pi=%s pi_customer=%s pi_invoice=%s pi_latest_charge=%s", debug_user_id, payment_intent_id, _stripe_obj_id(getattr(pi, "customer", None)), invoice_id, _stripe_obj_id(getattr(pi, "latest_charge", None)))
-            if not invoice_id:
-                latest_charge_id = _stripe_obj_id(getattr(pi, "latest_charge", None))
-                if latest_charge_id:
-                    charge = stripe_client.Charge.retrieve(latest_charge_id)
-                    invoice_id = _stripe_obj_id(getattr(charge, "invoice", None))
-                    if billing_debug:
-                        logger.info("billing_debug charge_lookup user_id=%s pi=%s charge=%s charge_invoice=%s", debug_user_id, payment_intent_id, latest_charge_id, invoice_id)
-            if invoice_id:
-                inv = stripe_client.Invoice.retrieve(invoice_id)
-                if billing_debug:
-                    logger.info("billing_debug pi_invoice_resolved user_id=%s pi=%s invoice_id=%s has_pdf=%s", debug_user_id, payment_intent_id, getattr(inv, "id", None), bool(getattr(inv, "invoice_pdf", None)))
-                return inv
-        except Exception as exc:
-            if billing_debug:
-                logger.exception("billing_debug pi_invoice_lookup_failed user_id=%s pi=%s error=%s", debug_user_id, payment_intent_id, exc)
-
-    if not payment_intent_id and not checkout_session_id:
-        return None
-    try:
-        invoices = stripe_client.Invoice.list(customer=customer_id, limit=100)
-    except Exception as exc:
-        if billing_debug:
-            logger.exception("billing_debug invoice_list_failed user_id=%s customer_id=%s error=%s", debug_user_id, customer_id, exc)
-        return None
-    for inv in invoices.auto_paging_iter():
-        inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        if payment_intent_id and inv_pi == payment_intent_id:
-            return inv
-        metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
-        inv_session = str(metadata.get("stripe_session_id") or "").strip()
-        if checkout_session_id and inv_session == checkout_session_id:
-            return inv
-    return None
-
-
-def _stripe_obj_id(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        return str(value.get("id") or "").strip()
-    return str(getattr(value, "id", "") or "").strip()
-
-
-def _ledger_topup_money_from_details(details: dict) -> tuple[str | None, int | None]:
-    package_key = str((details or {}).get("package_key") or "").strip()
-    if package_key.isdigit():
-        # Current topup packages are keyed by GBP amount (e.g. "10", "25").
-        pounds = int(package_key)
-        return "GBP", pounds * 100
-    return None, None
 
 
 def _get_stripe_client():
