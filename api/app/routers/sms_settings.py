@@ -17,6 +17,7 @@ from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
 from ..crypto_secrets import encrypt_secret, decrypt_secret
 from .auth import require_user
+from ..services.billing_trial import assert_billing_allows_sending
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
 
 def _add_months(anchor: datetime, months: int = 1) -> datetime:
@@ -820,6 +821,11 @@ def enable_sms(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
+    try:
+        assert_billing_allows_sending(db, user)
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     if not payload.accepted:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms acceptance required")
 
