@@ -32,6 +32,7 @@ class CheckoutSessionIn(BaseModel):
 @router.post("/checkout-session")
 def create_checkout_session(
     payload: CheckoutSessionIn,
+    db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
     package_key = str(payload.package_key)
@@ -71,10 +72,15 @@ def create_checkout_session(
             },
         },
     }
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
+    customer_id = str(getattr(profile, "stripe_customer_id", "") or "").strip() if profile else ""
     user_email = getattr(user, "email", None)
-    if not user_email:
-        raise HTTPException(status_code=400, detail="Logged-in user is missing an email address")
-    session_kwargs["customer_email"] = user_email
+    if customer_id:
+        session_kwargs["customer"] = customer_id
+    else:
+        if not user_email:
+            raise HTTPException(status_code=400, detail="Logged-in user is missing an email address")
+        session_kwargs["customer_email"] = user_email
 
     session = stripe_client.checkout.Session.create(**session_kwargs)
 

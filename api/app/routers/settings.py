@@ -263,13 +263,18 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         .all()
     )
     topup_payment_intents = set()
+    topup_checkout_sessions = set()
     for entry in ledger_topups:
         details = entry.details if isinstance(entry.details, dict) else {}
         pi = str(details.get("payment_intent_id") or "").strip()
         if pi:
             topup_payment_intents.add(pi)
+        session_id = str(details.get("stripe_session_id") or "").strip()
+        if session_id:
+            topup_checkout_sessions.add(session_id)
 
     seen_topup_payment_intents = set()
+    seen_topup_checkout_sessions = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
@@ -277,21 +282,35 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         metadata_pi = str(metadata.get("payment_intent_id") or "").strip()
         payment_intent_id = invoice_pi or metadata_pi
 
-        is_topup = (metadata.get("kind") == "sms_topup") or (payment_intent_id in topup_payment_intents)
+        metadata_session_id = str(metadata.get("stripe_session_id") or "").strip()
+        is_topup = (
+            (metadata.get("kind") == "sms_topup")
+            or (payment_intent_id in topup_payment_intents)
+            or (metadata_session_id in topup_checkout_sessions)
+        )
         kind = "membership" if inv_sub else ("topup" if is_topup else "other")
-        if payment_intent_id and kind == "topup":
-            seen_topup_payment_intents.add(payment_intent_id)
+        if kind == "topup":
+            if payment_intent_id:
+                seen_topup_payment_intents.add(payment_intent_id)
+            if metadata_session_id:
+                seen_topup_checkout_sessions.add(metadata_session_id)
 
         rows.append(_stripe_invoice_to_row(inv, kind=kind))
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
     for entry in ledger_topups:
         details = entry.details if isinstance(entry.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "")
-        if pi and pi in seen_topup_payment_intents:
+        pi = str(details.get("payment_intent_id") or "").strip()
+        session_id = str(details.get("stripe_session_id") or "").strip()
+        if (pi and pi in seen_topup_payment_intents) or (session_id and session_id in seen_topup_checkout_sessions):
             continue
 
-        stripe_invoice = _find_stripe_invoice_for_payment_intent(stripe_client, profile.stripe_customer_id, pi)
+        stripe_invoice = _find_stripe_invoice_for_topup(
+            stripe_client,
+            customer_id=profile.stripe_customer_id,
+            payment_intent_id=pi,
+            checkout_session_id=session_id,
+        )
         if stripe_invoice:
             rows.append(_stripe_invoice_to_row(stripe_invoice, kind="topup"))
             seen_topup_payment_intents.add(pi)
@@ -342,16 +361,36 @@ def _stripe_invoice_to_row(inv, *, kind: str) -> dict:
     }
 
 
-def _find_stripe_invoice_for_payment_intent(stripe_client, customer_id: str, payment_intent_id: str):
-    if not payment_intent_id:
+def _find_stripe_invoice_for_topup(
+    stripe_client,
+    *,
+    customer_id: str,
+    payment_intent_id: str,
+    checkout_session_id: str,
+):
+    # First try direct PI->invoice lookup (works even if invoice is on another Stripe customer).
+    if payment_intent_id:
+        try:
+            pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
+            invoice_id = str(getattr(pi, "invoice", "") or "").strip()
+            if invoice_id:
+                return stripe_client.Invoice.retrieve(invoice_id)
+        except Exception:
+            pass
+
+    if not payment_intent_id and not checkout_session_id:
         return None
     try:
-        invoices = stripe_client.Invoice.list(customer=customer_id, limit=50)
+        invoices = stripe_client.Invoice.list(customer=customer_id, limit=100)
     except Exception:
         return None
     for inv in invoices.auto_paging_iter():
         inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        if inv_pi == payment_intent_id:
+        if payment_intent_id and inv_pi == payment_intent_id:
+            return inv
+        metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
+        inv_session = str(metadata.get("stripe_session_id") or "").strip()
+        if checkout_session_id and inv_session == checkout_session_id:
             return inv
     return None
 
