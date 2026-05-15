@@ -282,18 +282,7 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         if payment_intent_id and kind == "topup":
             seen_topup_payment_intents.add(payment_intent_id)
 
-        rows.append({
-            "id": inv.id,
-            "number": getattr(inv, "number", None),
-            "status": getattr(inv, "status", None),
-            "currency": getattr(inv, "currency", "").upper() if getattr(inv, "currency", None) else None,
-            "amount_due": getattr(inv, "amount_due", None),
-            "amount_paid": getattr(inv, "amount_paid", None),
-            "created": getattr(inv, "created", None),
-            "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
-            "invoice_pdf": getattr(inv, "invoice_pdf", None),
-            "kind": kind,
-        })
+        rows.append(_stripe_invoice_to_row(inv, kind=kind))
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
     for entry in ledger_topups:
@@ -301,6 +290,13 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         pi = str(details.get("payment_intent_id") or "")
         if pi and pi in seen_topup_payment_intents:
             continue
+
+        stripe_invoice = _find_stripe_invoice_for_payment_intent(stripe_client, profile.stripe_customer_id, pi)
+        if stripe_invoice:
+            rows.append(_stripe_invoice_to_row(stripe_invoice, kind="topup"))
+            seen_topup_payment_intents.add(pi)
+            continue
+
         created_ts = int(entry.created_at.timestamp()) if entry.created_at else None
         currency, amount_paid = _ledger_topup_money_from_details(details)
         rows.append({
@@ -329,6 +325,35 @@ def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)
     )
     return {"ok": True, "stats": stats}
 
+
+
+def _stripe_invoice_to_row(inv, *, kind: str) -> dict:
+    return {
+        "id": inv.id,
+        "number": getattr(inv, "number", None),
+        "status": getattr(inv, "status", None),
+        "currency": getattr(inv, "currency", "").upper() if getattr(inv, "currency", None) else None,
+        "amount_due": getattr(inv, "amount_due", None),
+        "amount_paid": getattr(inv, "amount_paid", None),
+        "created": getattr(inv, "created", None),
+        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+        "invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "kind": kind,
+    }
+
+
+def _find_stripe_invoice_for_payment_intent(stripe_client, customer_id: str, payment_intent_id: str):
+    if not payment_intent_id:
+        return None
+    try:
+        invoices = stripe_client.Invoice.list(customer=customer_id, limit=50)
+    except Exception:
+        return None
+    for inv in invoices.auto_paging_iter():
+        inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
+        if inv_pi == payment_intent_id:
+            return inv
+    return None
 
 
 def _ledger_topup_money_from_details(details: dict) -> tuple[str | None, int | None]:
