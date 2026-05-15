@@ -255,7 +255,7 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
 
     rows = []
     for inv in invoices.auto_paging_iter():
-        metadata = getattr(inv, "metadata", {}) or {}
+        metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
         kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
         rows.append({
@@ -288,3 +288,18 @@ def _get_stripe_client():
     import stripe
     stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
     return stripe
+
+
+
+def _stripe_metadata_dict(raw_metadata) -> dict:
+    if raw_metadata is None:
+        return {}
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if hasattr(raw_metadata, "to_dict"):
+        converted = raw_metadata.to_dict()
+        if isinstance(converted, dict):
+            return converted
+    if hasattr(raw_metadata, "items"):
+        return {str(k): v for k, v in raw_metadata.items()}
+    return {}
