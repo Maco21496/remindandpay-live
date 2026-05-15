@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -173,7 +174,8 @@ def _handle_checkout_completed(db: Session, event: dict):
     if not settings:
         return
 
-    reference_id = f"stripe:checkout_session:{obj['id']}"
+    payment_intent_id = str(getattr(obj, "payment_intent", "") or "").strip()
+    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id, checkout_session_id=str(obj["id"]))
     if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
         return
 
@@ -191,7 +193,7 @@ def _handle_checkout_completed(db: Session, event: dict):
             details={
                 "stripe_event_id": event["id"],
                 "stripe_session_id": obj["id"],
-                "payment_intent_id": getattr(obj, "payment_intent", None),
+                "payment_intent_id": payment_intent_id or None,
                 "source": "stripe_webhook",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "package_key": metadata.get("package_key"),
@@ -219,7 +221,8 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
     if not settings:
         return
 
-    reference_id = f"stripe:payment_intent:{obj['id']}"
+    payment_intent_id = str(obj["id"])
+    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id)
     if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
         return
 
