@@ -1,6 +1,7 @@
 # app/routers/settings.py
 from __future__ import annotations
 import os
+import logging
 from pathlib import Path
 from typing import Optional, List
 from datetime import time as dtime, datetime
@@ -18,6 +19,7 @@ from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR   = PROJECT_ROOT / "web" / "static"
@@ -242,6 +244,7 @@ def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_use
 
 @router.get("/billing/invoices")
 def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=Depends(require_user)):
+    billing_debug = os.getenv("BILLING_DEBUG_INVOICES", "").strip().lower() in {"1", "true", "yes", "on"}
     profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
     if not profile or not profile.stripe_customer_id:
         return {"invoices": []}
@@ -288,11 +291,15 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         session_id = str(details.get("stripe_session_id") or "").strip()
         if session_id:
             topup_checkout_sessions.add(session_id)
+        if billing_debug:
+            logger.info("billing_debug ledger_topup user_id=%s ledger_id=%s pi=%s session_id=%s ref=%s", user.id, entry.id, pi, session_id, entry.reference_id)
 
     seen_topup_payment_intents = set()
     seen_topup_checkout_sessions = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
+        if billing_debug:
+            logger.info("billing_debug stripe_invoice_list user_id=%s invoice_id=%s customer=%s payment_intent=%s metadata_kind=%s metadata_session=%s has_pdf=%s", user.id, getattr(inv, "id", None), getattr(inv, "customer", None), getattr(inv, "payment_intent", None), metadata.get("kind"), metadata.get("stripe_session_id"), bool(getattr(inv, "invoice_pdf", None)))
         inv_sub = getattr(inv, "subscription", None)
         invoice_pi = str(getattr(inv, "payment_intent", "") or "").strip()
         metadata_pi = str(metadata.get("payment_intent_id") or "").strip()
@@ -326,6 +333,8 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
             customer_id=profile.stripe_customer_id,
             payment_intent_id=pi,
             checkout_session_id=session_id,
+            billing_debug=billing_debug,
+            debug_user_id=user.id,
         )
         if stripe_invoice:
             rows.append(_stripe_invoice_to_row(stripe_invoice, kind="topup"))
@@ -383,27 +392,39 @@ def _find_stripe_invoice_for_topup(
     customer_id: str,
     payment_intent_id: str,
     checkout_session_id: str,
+    billing_debug: bool = False,
+    debug_user_id: int | None = None,
 ):
     # First try direct PI->invoice lookup (works even if invoice is on another Stripe customer).
     if payment_intent_id:
         try:
             pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
             invoice_id = _stripe_obj_id(getattr(pi, "invoice", None))
+            if billing_debug:
+                logger.info("billing_debug pi_lookup user_id=%s pi=%s pi_customer=%s pi_invoice=%s pi_latest_charge=%s", debug_user_id, payment_intent_id, _stripe_obj_id(getattr(pi, "customer", None)), invoice_id, _stripe_obj_id(getattr(pi, "latest_charge", None)))
             if not invoice_id:
                 latest_charge_id = _stripe_obj_id(getattr(pi, "latest_charge", None))
                 if latest_charge_id:
                     charge = stripe_client.Charge.retrieve(latest_charge_id)
                     invoice_id = _stripe_obj_id(getattr(charge, "invoice", None))
+                    if billing_debug:
+                        logger.info("billing_debug charge_lookup user_id=%s pi=%s charge=%s charge_invoice=%s", debug_user_id, payment_intent_id, latest_charge_id, invoice_id)
             if invoice_id:
-                return stripe_client.Invoice.retrieve(invoice_id)
-        except Exception:
-            pass
+                inv = stripe_client.Invoice.retrieve(invoice_id)
+                if billing_debug:
+                    logger.info("billing_debug pi_invoice_resolved user_id=%s pi=%s invoice_id=%s has_pdf=%s", debug_user_id, payment_intent_id, getattr(inv, "id", None), bool(getattr(inv, "invoice_pdf", None)))
+                return inv
+        except Exception as exc:
+            if billing_debug:
+                logger.exception("billing_debug pi_invoice_lookup_failed user_id=%s pi=%s error=%s", debug_user_id, payment_intent_id, exc)
 
     if not payment_intent_id and not checkout_session_id:
         return None
     try:
         invoices = stripe_client.Invoice.list(customer=customer_id, limit=100)
-    except Exception:
+    except Exception as exc:
+        if billing_debug:
+            logger.exception("billing_debug invoice_list_failed user_id=%s customer_id=%s error=%s", debug_user_id, customer_id, exc)
         return None
     for inv in invoices.auto_paging_iter():
         inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
