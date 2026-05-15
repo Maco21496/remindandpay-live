@@ -339,6 +339,19 @@ def _handle_invoice_payment_failed(db: Session, event: dict):
     db.commit()
 
 
+def _sms_topup_reference_id(*, payment_intent_id: str = "", checkout_session_id: str = "") -> str:
+    payment_intent_id = (payment_intent_id or "").strip()
+    if payment_intent_id:
+        return f"stripe:pi:{payment_intent_id}"
+
+    checkout_session_id = (checkout_session_id or "").strip()
+    if checkout_session_id:
+        digest = hashlib.sha1(checkout_session_id.encode("utf-8")).hexdigest()[:16]
+        return f"stripe:cs:{digest}"
+
+    return "stripe:topup:unknown"
+
+
 def _metadata_to_dict(raw_metadata) -> dict:
     if raw_metadata is None:
         return {}
