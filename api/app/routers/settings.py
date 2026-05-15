@@ -296,6 +296,7 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
 
     seen_topup_payment_intents = set()
     seen_topup_checkout_sessions = set()
+    seen_stripe_invoice_ids = set()
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         if billing_debug:
@@ -318,6 +319,9 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
             if metadata_session_id:
                 seen_topup_checkout_sessions.add(metadata_session_id)
 
+        inv_id = str(getattr(inv, "id", "") or "").strip()
+        if inv_id:
+            seen_stripe_invoice_ids.add(inv_id)
         rows.append(_stripe_invoice_to_row(inv, kind=kind))
 
     # Backfill existing topups processed before invoice_creation was enabled in Checkout.
@@ -337,8 +341,20 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
             debug_user_id=user.id,
         )
         if stripe_invoice:
+            stripe_invoice_id = str(getattr(stripe_invoice, "id", "") or "").strip()
+            if stripe_invoice_id and stripe_invoice_id in seen_stripe_invoice_ids:
+                if pi:
+                    seen_topup_payment_intents.add(pi)
+                if session_id:
+                    seen_topup_checkout_sessions.add(session_id)
+                continue
             rows.append(_stripe_invoice_to_row(stripe_invoice, kind="topup"))
-            seen_topup_payment_intents.add(pi)
+            if stripe_invoice_id:
+                seen_stripe_invoice_ids.add(stripe_invoice_id)
+            if pi:
+                seen_topup_payment_intents.add(pi)
+            if session_id:
+                seen_topup_checkout_sessions.add(session_id)
             continue
 
         created_ts = int(entry.created_at.timestamp()) if entry.created_at else None

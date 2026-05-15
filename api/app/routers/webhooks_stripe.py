@@ -181,8 +181,9 @@ def _handle_checkout_completed(db: Session, event: dict):
         return
 
     payment_intent_id = str(getattr(obj, "payment_intent", "") or "").strip()
-    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id, checkout_session_id=str(obj["id"]))
-    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
+    checkout_session_id = str(obj["id"])
+    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id, checkout_session_id=checkout_session_id)
+    if _topup_already_recorded(db, payment_intent_id=payment_intent_id, checkout_session_id=checkout_session_id):
         return
 
     amount = _credits_for_checkout_session(metadata)
@@ -198,7 +199,7 @@ def _handle_checkout_completed(db: Session, event: dict):
             reference_id=reference_id,
             details={
                 "stripe_event_id": event["id"],
-                "stripe_session_id": obj["id"],
+                "stripe_session_id": checkout_session_id,
                 "payment_intent_id": payment_intent_id or None,
                 "source": "stripe_webhook",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
@@ -229,7 +230,7 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
 
     payment_intent_id = str(obj["id"])
     reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id)
-    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reference_id).first():
+    if _topup_already_recorded(db, payment_intent_id=payment_intent_id):
         return
 
     amount = _credits_for_checkout_session(metadata)
@@ -253,6 +254,44 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
         )
     )
     db.commit()
+
+
+def _topup_already_recorded(db: Session, *, payment_intent_id: str, checkout_session_id: str = "") -> bool:
+    payment_intent_id = (payment_intent_id or "").strip()
+    checkout_session_id = (checkout_session_id or "").strip()
+
+    if payment_intent_id:
+        candidate_refs = {
+            f"stripe:pi:{payment_intent_id}",
+            f"stripe:payment_intent:{payment_intent_id}",
+        }
+        if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id.in_(candidate_refs)).first():
+            return True
+
+        rows = (
+            db.query(SmsCreditLedger)
+            .filter(SmsCreditLedger.reason == "stripe_topup")
+            .filter(SmsCreditLedger.details.isnot(None))
+            .all()
+        )
+        for row in rows:
+            details = row.details if isinstance(row.details, dict) else {}
+            if str(details.get("payment_intent_id") or "").strip() == payment_intent_id:
+                return True
+
+    if checkout_session_id:
+        rows = (
+            db.query(SmsCreditLedger)
+            .filter(SmsCreditLedger.reason == "stripe_topup")
+            .filter(SmsCreditLedger.details.isnot(None))
+            .all()
+        )
+        for row in rows:
+            details = row.details if isinstance(row.details, dict) else {}
+            if str(details.get("stripe_session_id") or "").strip() == checkout_session_id:
+                return True
+
+    return False
 
 
 def _find_billing_profile(db: Session, *, user_id: int | None = None, stripe_customer_id: str | None = None, stripe_subscription_id: str | None = None):
