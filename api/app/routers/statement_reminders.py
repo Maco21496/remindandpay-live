@@ -28,6 +28,7 @@ from ..models import (
     AppSettings, 
 )
 from .auth import require_user
+from ..services.billing_trial import assert_billing_allows_sending
 
 router = APIRouter(prefix="/api/statement_reminders", tags=["statement_reminders"])
 
@@ -495,6 +496,10 @@ def _statement_body(default_message: str = None):
 
 @router.post("/email/statement/enqueue-one")
 def enqueue_one_statement(body: OneOffStatementIn, db: Session = Depends(get_db), user=Depends(require_user)):
+    try:
+        assert_billing_allows_sending(db, user)
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=str(e))
     # 1) sanity + ownership
     cust = (
         db.query(Customer)
