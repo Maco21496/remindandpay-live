@@ -289,12 +289,21 @@
         <div class="muted">Subscription status: <strong id="billing_subscription_status">-</strong></div>
         <div class="field-row" style="margin-top:10px; gap:8px;">
           <button id="billing_subscribe_btn" class="btn">Start Standard membership (£29/month)</button>
+          <span id="billing_active_badge" class="muted" style="display:none; font-weight:600;">Membership active</span>
         </div>
       </div>
 
       <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
         <h3 style="margin:0 0 8px 0; font-size:16px;">Invoices</h3>
-        <div class="muted">Invoice history and downloads will be shown here after subscription checkout is wired.</div>
+        <div class="field-row" style="gap:8px; align-items:center; margin-bottom:8px;">
+          <button id="billing_invoices_refresh" class="btn btn--ghost">Refresh invoices</button>
+          <span id="billing_invoices_msg" class="muted"></span>
+        </div>
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Status</th><th>Amount</th><th>Links</th></tr></thead>
+          <tbody id="billing_invoices_rows"></tbody>
+        </table>
+        <div id="billing_invoices_empty" class="muted">No Stripe invoices found.</div>
       </div>
 
       <span id="billing_msg" class="muted"></span>

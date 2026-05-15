@@ -238,6 +238,40 @@ def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_use
         "stripe_subscription_id": profile.stripe_subscription_id,
     }
 
+
+
+@router.get("/billing/invoices")
+def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=Depends(require_user)):
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
+    if not profile or not profile.stripe_customer_id:
+        return {"invoices": []}
+
+    stripe_client = _get_stripe_client()
+    if not stripe_client.api_key:
+        return {"invoices": []}
+
+    limit = max(1, min(int(limit or 20), 100))
+    invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+
+    rows = []
+    for inv in invoices.auto_paging_iter():
+        metadata = getattr(inv, "metadata", {}) or {}
+        inv_sub = getattr(inv, "subscription", None)
+        kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
+        rows.append({
+            "id": inv.id,
+            "number": getattr(inv, "number", None),
+            "status": getattr(inv, "status", None),
+            "currency": getattr(inv, "currency", "").upper() if getattr(inv, "currency", None) else None,
+            "amount_due": getattr(inv, "amount_due", None),
+            "amount_paid": getattr(inv, "amount_paid", None),
+            "created": getattr(inv, "created", None),
+            "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+            "invoice_pdf": getattr(inv, "invoice_pdf", None),
+            "kind": kind,
+        })
+    return {"invoices": rows}
+
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):
     stats = run_initial_user_setup(
@@ -248,3 +282,9 @@ def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)
     )
     return {"ok": True, "stats": stats}
 
+
+
+def _get_stripe_client():
+    import stripe
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    return stripe
