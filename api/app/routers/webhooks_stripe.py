@@ -1,7 +1,7 @@
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import Request
 
@@ -16,6 +16,7 @@ _STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 _WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 _PUBLIC_BASE_URL = os.getenv("APP_BASE_URL", "https://app.remindandpay.com").rstrip("/")
 _SUBSCRIPTION_PRICE_ID = os.getenv("STRIPE_STARTER_SUBSCRIPTION_PRICE_ID", "")
+_TOPUP_RETRY_MAX_ATTEMPTS = 5
 
 _TOPUP_PACKAGES = {
     "10": {"price_id": os.getenv("STRIPE_SMS_TOPUP_10_PRICE_ID", ""), "credits": 1000},
@@ -291,7 +292,12 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
             except Exception:
                 pass
     if not invoice_id:
-        return {}
+        return {
+            "invoice_reconcile_status": "pending",
+            "invoice_retry_count": 0,
+            "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
+            "next_retry_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+        }
     try:
         inv = stripe_client.Invoice.retrieve(invoice_id)
     except Exception:
@@ -301,6 +307,10 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
         "stripe_invoice_number": getattr(inv, "number", None),
         "stripe_invoice_pdf": getattr(inv, "invoice_pdf", None),
         "stripe_invoice_url": getattr(inv, "hosted_invoice_url", None),
+        "invoice_reconcile_status": "resolved",
+        "invoice_retry_count": 0,
+        "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
+        "next_retry_at": None,
     }
 
 
