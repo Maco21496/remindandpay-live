@@ -18,6 +18,21 @@ from .auth import require_owner
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
+    rows = (
+        db.query(SmsCreditLedger.user_id, SmsCreditLedger.details)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    counts: dict[int, int] = {}
+    for user_id, details in rows:
+        meta = details if isinstance(details, dict) else {}
+        if meta.get("stripe_invoice_id"):
+            continue
+        counts[user_id] = counts.get(user_id, 0) + 1
+    return counts
+
+
 def _render_admin_dashboard(request: Request, db: Session, owner: User):
     """
     Owner-only management screen for all users.
@@ -30,6 +45,7 @@ def _render_admin_dashboard(request: Request, db: Session, owner: User):
     )
 
     active_tab = request.query_params.get("tab", "users")
+    topup_anomaly_counts = _topup_anomaly_counts_by_user(db)
 
     return templates.TemplateResponse(
         "admin_dashboard.html",
@@ -38,6 +54,7 @@ def _render_admin_dashboard(request: Request, db: Session, owner: User):
             "users": users,
             "owner_email": (owner.email or "").strip().lower(),
             "active_tab": active_tab,
+            "topup_anomaly_counts": topup_anomaly_counts,
         },
     )
 
@@ -479,17 +496,15 @@ def admin_enqueue_billing_trial_notifications(
 @router.get("/billing/topup-anomalies")
 def admin_billing_topup_anomalies(
     limit: int = 200,
+    user_id: int | None = None,
     db: Session = Depends(get_db),
     owner: User = Depends(require_owner),
 ):
     limit = max(1, min(int(limit or 200), 1000))
-    rows = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .order_by(SmsCreditLedger.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(SmsCreditLedger).filter(SmsCreditLedger.reason == "stripe_topup")
+    if user_id is not None:
+        q = q.filter(SmsCreditLedger.user_id == user_id)
+    rows = q.order_by(SmsCreditLedger.created_at.desc()).limit(limit).all()
 
     anomalies = []
     for row in rows:
@@ -578,13 +593,10 @@ def admin_reconcile_topup_anomalies(
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
     limit = max(1, min(int(limit or 200), 1000))
-    rows = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .order_by(SmsCreditLedger.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(SmsCreditLedger).filter(SmsCreditLedger.reason == "stripe_topup")
+    if user_id is not None:
+        q = q.filter(SmsCreditLedger.user_id == user_id)
+    rows = q.order_by(SmsCreditLedger.created_at.desc()).limit(limit).all()
 
     scanned = 0
     resolved = 0
