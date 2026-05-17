@@ -190,6 +190,8 @@ def _handle_checkout_completed(db: Session, event: dict):
     if amount <= 0:
         return
 
+    invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
+
     db.add(
         SmsCreditLedger(
             user_id=user_id,
@@ -204,6 +206,7 @@ def _handle_checkout_completed(db: Session, event: dict):
                 "source": "stripe_webhook",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "package_key": metadata.get("package_key"),
+                **invoice_details,
             },
         )
     )
@@ -237,6 +240,8 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
     if amount <= 0:
         return
 
+    invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
+
     db.add(
         SmsCreditLedger(
             user_id=user_id,
@@ -250,10 +255,53 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
                 "source": "stripe_webhook_payment_intent",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "package_key": metadata.get("package_key"),
+                **invoice_details,
             },
         )
     )
     db.commit()
+
+
+def _stripe_obj_id(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(value.get("id") or "").strip()
+    return str(getattr(value, "id", "") or "").strip()
+
+
+def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dict:
+    payment_intent_id = (payment_intent_id or "").strip()
+    if not payment_intent_id:
+        return {}
+    try:
+        pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
+    except Exception:
+        return {}
+
+    invoice_id = _stripe_obj_id(getattr(pi, "invoice", None))
+    if not invoice_id:
+        charge_id = _stripe_obj_id(getattr(pi, "latest_charge", None))
+        if charge_id:
+            try:
+                ch = stripe_client.Charge.retrieve(charge_id)
+                invoice_id = _stripe_obj_id(getattr(ch, "invoice", None))
+            except Exception:
+                pass
+    if not invoice_id:
+        return {}
+    try:
+        inv = stripe_client.Invoice.retrieve(invoice_id)
+    except Exception:
+        return {"stripe_invoice_id": invoice_id}
+    return {
+        "stripe_invoice_id": invoice_id,
+        "stripe_invoice_number": getattr(inv, "number", None),
+        "stripe_invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "stripe_invoice_url": getattr(inv, "hosted_invoice_url", None),
+    }
 
 
 def _topup_already_recorded(db: Session, *, payment_intent_id: str, checkout_session_id: str = "") -> bool:

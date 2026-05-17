@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..database import get_db
-from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile
+from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger
 from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
 from ..shared import templates
@@ -474,3 +474,39 @@ def admin_enqueue_billing_trial_notifications(
 ):
     result = enqueue_trial_notifications(db)
     return {"ok": True, **result}
+
+
+@router.get("/billing/topup-anomalies")
+def admin_billing_topup_anomalies(
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    limit = max(1, min(int(limit or 200), 1000))
+    rows = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .order_by(SmsCreditLedger.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    anomalies = []
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        if details.get("stripe_invoice_id"):
+            continue
+        anomalies.append({
+            "ledger_id": row.id,
+            "user_id": row.user_id,
+            "created_at": row.created_at,
+            "amount": row.amount,
+            "reference_id": row.reference_id,
+            "payment_intent_id": details.get("payment_intent_id"),
+            "stripe_session_id": details.get("stripe_session_id"),
+        })
+
+    return {
+        "count": len(anomalies),
+        "anomalies": anomalies,
+    }
