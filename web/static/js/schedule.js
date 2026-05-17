@@ -1415,7 +1415,15 @@ document.addEventListener("click", (e) => {
       }, 200);
     } catch (e) {
       console.error(e);
-      if (chSNRes) chSNRes.textContent = "Failed to send.";
+      let detail = "Failed to enqueue messages.";
+      if (e && typeof e.message === "string" && e.message) detail = e.message;
+      if (chSNRes) chSNRes.textContent = detail;
+      const lowered = detail.toLowerCase();
+      if (lowered.includes("trial") || lowered.includes("billing") || lowered.includes("membership") || lowered.includes("402")) {
+        alert("Your trial has ended and sending is restricted. Please activate membership in Billing.");
+        window.location.href = "/settings#billing";
+        return;
+      }
       alert("Failed to enqueue messages.");
     }
   }
