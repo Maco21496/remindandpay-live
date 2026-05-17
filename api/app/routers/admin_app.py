@@ -582,6 +582,7 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) 
 @router.post("/billing/topup-anomalies/reconcile")
 def admin_reconcile_topup_anomalies(
     limit: int = 200,
+    user_id: int | None = None,
     apply_changes: bool = True,
     db: Session = Depends(get_db),
     owner: User = Depends(require_owner),
