@@ -159,6 +159,92 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/topup-reconcile/enqueue-due")
+def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
+    """Scheduler-triggered bounded retry pass for unresolved top-up invoice linkage."""
+    stripe_client = _get_stripe_client()
+    if not stripe_client.api_key:
+        return {"ok": False, "error": "STRIPE_SECRET_KEY not configured"}
+
+    now = datetime.now(timezone.utc)
+    batch_limit = max(1, min(int(os.getenv("TOPUP_RECONCILE_BATCH_LIMIT", "100")), 500))
+
+    rows = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .order_by(SmsCreditLedger.created_at.asc())
+        .limit(batch_limit * 3)
+        .all()
+    )
+
+    scanned = 0
+    resolved = 0
+    marked_anomaly = 0
+    updated = 0
+
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        if details.get("stripe_invoice_id"):
+            continue
+
+        status = str(details.get("invoice_reconcile_status") or "pending")
+        retry_count = int(details.get("invoice_retry_count") or 0)
+        max_attempts = int(details.get("invoice_retry_max_attempts") or _TOPUP_RETRY_MAX_ATTEMPTS)
+        next_retry_raw = details.get("next_retry_at")
+
+        if status == "anomaly" or retry_count >= max_attempts:
+            continue
+
+        if next_retry_raw:
+            try:
+                due_at = datetime.fromisoformat(str(next_retry_raw).replace("Z", "+00:00"))
+                if due_at.tzinfo is None:
+                    due_at = due_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                due_at = now
+            if due_at > now:
+                continue
+
+        scanned += 1
+        payment_intent_id = str(details.get("payment_intent_id") or "").strip()
+        found = _resolve_topup_invoice_details(stripe_client, payment_intent_id)
+
+        if found.get("stripe_invoice_id"):
+            details.update(found)
+            details["invoice_reconcile_status"] = "resolved"
+            details["next_retry_at"] = None
+            resolved += 1
+        else:
+            retry_count += 1
+            details["invoice_retry_count"] = retry_count
+            details["invoice_retry_max_attempts"] = max_attempts
+            if retry_count >= max_attempts:
+                details["invoice_reconcile_status"] = "anomaly"
+                details["next_retry_at"] = None
+                marked_anomaly += 1
+            else:
+                details["invoice_reconcile_status"] = "pending"
+                details["next_retry_at"] = (now + _retry_delay_for_attempt(retry_count)).isoformat()
+
+        row.details = details
+        db.add(row)
+        updated += 1
+
+        if scanned >= batch_limit:
+            break
+
+    if updated:
+        db.commit()
+
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "resolved": resolved,
+        "marked_anomaly": marked_anomaly,
+        "updated": updated,
+    }
+
+
 def _handle_checkout_completed(db: Session, event: dict):
     obj = event["data"]["object"]
     if getattr(obj, "mode", None) != "payment":
@@ -312,6 +398,17 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
         "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
         "next_retry_at": None,
     }
+
+
+def _retry_delay_for_attempt(attempt: int) -> timedelta:
+    schedule = {
+        1: timedelta(minutes=15),
+        2: timedelta(hours=1),
+        3: timedelta(hours=4),
+        4: timedelta(hours=12),
+        5: timedelta(hours=24),
+    }
+    return schedule.get(attempt, timedelta(hours=24))
 
 
 def _topup_already_recorded(db: Session, *, payment_intent_id: str, checkout_session_id: str = "") -> bool:
