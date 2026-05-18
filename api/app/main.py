@@ -37,6 +37,7 @@ from .routers.admin_app import router as admin_router
 from .routers.sms_settings import router as sms_settings_router
 from .routers.sms_pricing import router as sms_pricing_router
 from .routers.sms_webhooks import router as sms_webhooks_router
+from .routers.webhooks_stripe import router as stripe_webhooks_router
 
 from .models import Base, Customer
 from .database import engine, get_db
@@ -74,6 +75,7 @@ app.include_router(admin_router)
 app.include_router(sms_settings_router)
 app.include_router(sms_pricing_router)
 app.include_router(sms_webhooks_router)
+app.include_router(stripe_webhooks_router)
 
 # /auth endpoints (login/logout)
 app.include_router(auth_router.router)
