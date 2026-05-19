@@ -41,6 +41,34 @@ class AppSettings(Base):
 
     user = relationship("User")
 
+
+
+class BillingSettings(Base):
+    __tablename__ = "billing_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    default_trial_days = Column(Integer, nullable=False, default=30)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AccountBillingProfile(Base):
+    __tablename__ = "account_billing_profiles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    trial_days_assigned = Column(Integer, nullable=False, default=30)
+    trial_started_at = Column(DateTime, nullable=False)
+    trial_ends_at = Column(DateTime, nullable=False)
+    subscription_status = Column(String(20), nullable=False, default="trialing")
+    stripe_customer_id = Column(String(64), nullable=True)
+    stripe_subscription_id = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
 class AccountSmsSettings(Base):
     __tablename__ = "account_sms_settings"
     __table_args__ = (
