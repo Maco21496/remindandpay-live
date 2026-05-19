@@ -35,6 +35,21 @@ def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
     return counts
 
 
+def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
+    rows = (
+        db.query(SmsCreditLedger.user_id, SmsCreditLedger.details)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    counts: dict[int, int] = {}
+    for user_id, details in rows:
+        meta = details if isinstance(details, dict) else {}
+        if meta.get("stripe_invoice_id"):
+            continue
+        counts[user_id] = counts.get(user_id, 0) + 1
+    return counts
+
+
 def _render_admin_dashboard(request: Request, db: Session, owner: User):
     """
     Owner-only management screen for all users.
