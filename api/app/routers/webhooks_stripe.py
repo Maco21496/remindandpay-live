@@ -185,7 +185,7 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
     updated = 0
 
     for row in rows:
-        details = row.details if isinstance(row.details, dict) else {}
+        details = dict(row.details) if isinstance(row.details, dict) else {}
         if details.get("stripe_invoice_id"):
             continue
 
@@ -266,7 +266,7 @@ def _handle_charge_refunded(db: Session, event: dict):
     )
     matched = []
     for row in credits:
-        details = row.details if isinstance(row.details, dict) else {}
+        details = dict(row.details) if isinstance(row.details, dict) else {}
         if str(details.get("payment_intent_id") or "").strip() == payment_intent_id and row.entry_type == "credit":
             matched.append(row)
     if not matched:
@@ -518,7 +518,7 @@ def _topup_already_recorded(db: Session, *, payment_intent_id: str, checkout_ses
             .all()
         )
         for row in rows:
-            details = row.details if isinstance(row.details, dict) else {}
+            details = dict(row.details) if isinstance(row.details, dict) else {}
             if str(details.get("payment_intent_id") or "").strip() == payment_intent_id:
                 return True
 
@@ -530,7 +530,7 @@ def _topup_already_recorded(db: Session, *, payment_intent_id: str, checkout_ses
             .all()
         )
         for row in rows:
-            details = row.details if isinstance(row.details, dict) else {}
+            details = dict(row.details) if isinstance(row.details, dict) else {}
             if str(details.get("stripe_session_id") or "").strip() == checkout_session_id:
                 return True
 

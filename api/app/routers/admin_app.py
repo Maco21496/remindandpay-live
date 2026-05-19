@@ -508,7 +508,7 @@ def admin_billing_topup_anomalies(
 
     anomalies = []
     for row in rows:
-        details = row.details if isinstance(row.details, dict) else {}
+        details = dict(row.details) if isinstance(row.details, dict) else {}
         if details.get("stripe_invoice_id"):
             continue
         status = str(details.get("invoice_reconcile_status") or "pending")
@@ -625,7 +625,7 @@ def admin_reconcile_topup_anomalies(
     now = datetime.now(timezone.utc)
 
     for row in rows:
-        details = row.details if isinstance(row.details, dict) else {}
+        details = dict(row.details) if isinstance(row.details, dict) else {}
         if details.get("stripe_invoice_id"):
             continue
         status = str(details.get("invoice_reconcile_status") or "pending")
