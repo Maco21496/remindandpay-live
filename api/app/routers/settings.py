@@ -13,7 +13,7 @@ from zoneinfo import available_timezones
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger
+from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger, SmsCreditLedger
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
@@ -255,12 +255,25 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     limit = max(1, min(int(limit or 20), 100))
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
+    refunded_payment_intents = {
+        str((row.details or {}).get("payment_intent_id") or "").strip()
+        for row in db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .filter(SmsCreditLedger.reason == "stripe_refund_reversal")
+        .all()
+        if isinstance(row.details, dict)
+    }
+
     rows = []
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
         kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
-        rows.append(_stripe_invoice_to_row(inv, kind=kind))
+        row = _stripe_invoice_to_row(inv, kind=kind)
+        inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
+        if kind == "topup" and inv_pi and inv_pi in refunded_payment_intents:
+            row["status"] = "refunded"
+        rows.append(row)
 
     rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return {"invoices": rows[:limit]}

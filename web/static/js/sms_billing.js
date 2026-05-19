@@ -75,7 +75,8 @@
   function renderRow(entry) {
     const details = entry.details || {};
     const segments = details.segments ?? "-";
-    const direction = entry.entry_type === "debit" ? "Outbound" : "Credit";
+    const isRefundReversal = entry.reason === "stripe_refund_reversal";
+    const direction = isRefundReversal ? "Refund" : (entry.entry_type === "debit" ? "Outbound" : "Credit");
     const to = details.to || "-";
     const credits = entry.entry_type === "debit" ? `-${entry.amount}` : `+${entry.amount}`;
     const balance = entry.balance_after ?? "";
