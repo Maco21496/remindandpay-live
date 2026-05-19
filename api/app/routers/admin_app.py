@@ -558,35 +558,39 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str, 
     invoice_id = ""
     inv = None
 
-    # Most reliable for one-off top-ups: ask Stripe invoices directly by PI id.
     try:
-        lst = stripe_client.Invoice.list(payment_intent=payment_intent_id, limit=1)
-        items = getattr(lst, "data", None) or []
-        if items:
-            inv = items[0]
-            debug["list_count"] = len(items)
-            invoice_id = str(getattr(inv, "id", "") or "").strip()
+        pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
     except Exception as ex:
-        debug["list_error"] = str(ex)
+        debug["pi_error"] = str(ex)
+        pi = None
 
-    # Fallback path if list() did not return an invoice.
-    if not invoice_id:
-        try:
-            pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
-        except Exception as ex:
-            debug["pi_error"] = str(ex)
-            pi = None
+    if pi is not None:
+        invoice_id = str(getattr(getattr(pi, "invoice", None), "id", None) or getattr(pi, "invoice", "") or "").strip()
 
-        if pi is not None:
-            invoice_id = str(getattr(getattr(pi, "invoice", None), "id", None) or getattr(pi, "invoice", "") or "").strip()
-            if not invoice_id:
-                charge_id = str(getattr(getattr(pi, "latest_charge", None), "id", None) or getattr(pi, "latest_charge", "") or "").strip()
-                if charge_id:
-                    try:
-                        ch = stripe_client.Charge.retrieve(charge_id)
-                        invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
-                    except Exception as ex:
-                        debug["charge_error"] = str(ex)
+        if not invoice_id:
+            charge_id = str(getattr(getattr(pi, "latest_charge", None), "id", None) or getattr(pi, "latest_charge", "") or "").strip()
+            if charge_id:
+                try:
+                    ch = stripe_client.Charge.retrieve(charge_id)
+                    invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
+                except Exception as ex:
+                    debug["charge_error"] = str(ex)
+
+        if not invoice_id:
+            customer_id = str(getattr(getattr(pi, "customer", None), "id", None) or getattr(pi, "customer", "") or "").strip()
+            if customer_id:
+                try:
+                    lst = stripe_client.Invoice.list(customer=customer_id, limit=100)
+                    items = getattr(lst, "data", None) or []
+                    debug["list_count"] = len(items)
+                    for candidate in items:
+                        candidate_pi = str(getattr(getattr(candidate, "payment_intent", None), "id", None) or getattr(candidate, "payment_intent", "") or "").strip()
+                        if candidate_pi == payment_intent_id:
+                            inv = candidate
+                            invoice_id = str(getattr(inv, "id", "") or "").strip()
+                            break
+                except Exception as ex:
+                    debug["list_error"] = str(ex)
 
     if not invoice_id:
         if include_debug:
