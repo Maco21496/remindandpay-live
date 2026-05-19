@@ -551,31 +551,37 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) 
     payment_intent_id = (payment_intent_id or "").strip()
     if not payment_intent_id:
         return {}
-    try:
-        pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
-    except Exception:
-        return {}
 
-    invoice_id = str(getattr(getattr(pi, "invoice", None), "id", None) or getattr(pi, "invoice", "") or "").strip()
-    if not invoice_id:
-        charge_id = str(getattr(getattr(pi, "latest_charge", None), "id", None) or getattr(pi, "latest_charge", "") or "").strip()
-        if charge_id:
-            try:
-                ch = stripe_client.Charge.retrieve(charge_id)
-                invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
-            except Exception:
-                pass
-
+    invoice_id = ""
     inv = None
+
+    # Most reliable for one-off top-ups: ask Stripe invoices directly by PI id.
+    try:
+        lst = stripe_client.Invoice.list(payment_intent=payment_intent_id, limit=1)
+        items = getattr(lst, "data", None) or []
+        if items:
+            inv = items[0]
+            invoice_id = str(getattr(inv, "id", "") or "").strip()
+    except Exception:
+        pass
+
+    # Fallback path if list() did not return an invoice.
     if not invoice_id:
         try:
-            lst = stripe_client.Invoice.list(payment_intent=payment_intent_id, limit=1)
-            items = getattr(lst, "data", None) or []
-            if items:
-                inv = items[0]
-                invoice_id = str(getattr(inv, "id", "") or "").strip()
+            pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
         except Exception:
-            pass
+            pi = None
+
+        if pi is not None:
+            invoice_id = str(getattr(getattr(pi, "invoice", None), "id", None) or getattr(pi, "invoice", "") or "").strip()
+            if not invoice_id:
+                charge_id = str(getattr(getattr(pi, "latest_charge", None), "id", None) or getattr(pi, "latest_charge", "") or "").strip()
+                if charge_id:
+                    try:
+                        ch = stripe_client.Charge.retrieve(charge_id)
+                        invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
+                    except Exception:
+                        pass
 
     if not invoice_id:
         return {}
