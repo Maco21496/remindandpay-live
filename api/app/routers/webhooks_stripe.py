@@ -446,6 +446,18 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
                 invoice_id = _stripe_obj_id(getattr(ch, "invoice", None))
             except Exception:
                 pass
+
+    inv = None
+    if not invoice_id:
+        try:
+            lst = stripe_client.Invoice.list(payment_intent=payment_intent_id, limit=1)
+            items = getattr(lst, "data", None) or []
+            if items:
+                inv = items[0]
+                invoice_id = _stripe_obj_id(inv)
+        except Exception:
+            pass
+
     if not invoice_id:
         return {
             "invoice_reconcile_status": "pending",
@@ -453,10 +465,11 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
             "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
             "next_retry_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         }
-    try:
-        inv = stripe_client.Invoice.retrieve(invoice_id)
-    except Exception:
-        return {"stripe_invoice_id": invoice_id}
+    if inv is None:
+        try:
+            inv = stripe_client.Invoice.retrieve(invoice_id)
+        except Exception:
+            return {"stripe_invoice_id": invoice_id}
     return {
         "stripe_invoice_id": invoice_id,
         "stripe_invoice_number": getattr(inv, "number", None),

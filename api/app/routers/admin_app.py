@@ -565,12 +565,25 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) 
                 invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
             except Exception:
                 pass
+
+    inv = None
+    if not invoice_id:
+        try:
+            lst = stripe_client.Invoice.list(payment_intent=payment_intent_id, limit=1)
+            items = getattr(lst, "data", None) or []
+            if items:
+                inv = items[0]
+                invoice_id = str(getattr(inv, "id", "") or "").strip()
+        except Exception:
+            pass
+
     if not invoice_id:
         return {}
-    try:
-        inv = stripe_client.Invoice.retrieve(invoice_id)
-    except Exception:
-        return {"stripe_invoice_id": invoice_id}
+    if inv is None:
+        try:
+            inv = stripe_client.Invoice.retrieve(invoice_id)
+        except Exception:
+            return {"stripe_invoice_id": invoice_id}
     return {
         "stripe_invoice_id": invoice_id,
         "stripe_invoice_number": getattr(inv, "number", None),
