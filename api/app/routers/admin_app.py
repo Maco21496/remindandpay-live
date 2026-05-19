@@ -1,6 +1,7 @@
 # FINAL VERSION OF api/app/routers/admin_app.py
 from typing import List
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, status, HTTPException
@@ -16,6 +17,22 @@ from ..shared import templates
 from .auth import require_owner
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
+
+
+def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
+    rows = (
+        db.query(SmsCreditLedger.user_id, SmsCreditLedger.details)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    counts: dict[int, int] = {}
+    for user_id, details in rows:
+        meta = details if isinstance(details, dict) else {}
+        if meta.get("stripe_invoice_id"):
+            continue
+        counts[user_id] = counts.get(user_id, 0) + 1
+    return counts
 
 
 def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
@@ -623,6 +640,8 @@ def admin_reconcile_topup_anomalies(
     anomalies = 0
     updated = 0
     now = datetime.now(timezone.utc)
+    debug_enabled = os.getenv("BILLING_RECONCILE_DEBUG", "0").lower() in {"1", "true", "yes"}
+    debug_rows = []
 
     for row in rows:
         details = dict(row.details) if isinstance(row.details, dict) else {}
@@ -638,6 +657,15 @@ def admin_reconcile_topup_anomalies(
         payment_intent_id = str(details.get("payment_intent_id") or "").strip()
 
         found = _resolve_topup_invoice_details_admin(stripe, payment_intent_id)
+        if debug_enabled and len(debug_rows) < 50:
+            debug_rows.append({
+                "ledger_id": row.id,
+                "payment_intent_id": payment_intent_id,
+                "found_invoice_id": found.get("stripe_invoice_id"),
+                "found_invoice_number": found.get("stripe_invoice_number"),
+                "prev_status": status,
+                "prev_retry_count": retry_count,
+            })
         if found.get("stripe_invoice_id"):
             details.update(found)
             details["invoice_reconcile_status"] = "resolved"
@@ -668,6 +696,9 @@ def admin_reconcile_topup_anomalies(
     if apply_changes and updated:
         db.commit()
 
+    if debug_enabled:
+        logger.warning("[admin_billing_reconcile_summary] scanned=%s resolved=%s anomalies=%s updated=%s user_id=%s", scanned, resolved, anomalies, updated, user_id)
+
     return {
         "ok": True,
         "apply_changes": apply_changes,
@@ -675,4 +706,5 @@ def admin_reconcile_topup_anomalies(
         "resolved": resolved,
         "anomalies": anomalies,
         "updated": updated,
+        "debug": debug_rows if debug_enabled else [],
     }

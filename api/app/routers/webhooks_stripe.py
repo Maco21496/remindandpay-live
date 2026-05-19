@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timezone, timedelta
 
@@ -17,6 +18,7 @@ _WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 _PUBLIC_BASE_URL = os.getenv("APP_BASE_URL", "https://app.remindandpay.com").rstrip("/")
 _SUBSCRIPTION_PRICE_ID = os.getenv("STRIPE_STARTER_SUBSCRIPTION_PRICE_ID", "")
 _TOPUP_RETRY_MAX_ATTEMPTS = 5
+logger = logging.getLogger(__name__)
 
 _TOPUP_PACKAGES = {
     "10": {"price_id": os.getenv("STRIPE_SMS_TOPUP_10_PRICE_ID", ""), "credits": 1000},
@@ -183,10 +185,15 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
     resolved = 0
     marked_anomaly = 0
     updated = 0
+    skipped_has_invoice = 0
+    skipped_not_due = 0
+    skipped_exhausted = 0
+    debug_enabled = os.getenv("BILLING_RECONCILE_DEBUG", "0").lower() in {"1", "true", "yes"}
 
     for row in rows:
         details = dict(row.details) if isinstance(row.details, dict) else {}
         if details.get("stripe_invoice_id"):
+            skipped_has_invoice += 1
             continue
 
         status = str(details.get("invoice_reconcile_status") or "pending")
@@ -195,6 +202,7 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
         next_retry_raw = details.get("next_retry_at")
 
         if status == "anomaly" or retry_count >= max_attempts:
+            skipped_exhausted += 1
             continue
 
         if next_retry_raw:
@@ -205,11 +213,14 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
             except Exception:
                 due_at = now
             if due_at > now:
+                skipped_not_due += 1
                 continue
 
         scanned += 1
         payment_intent_id = str(details.get("payment_intent_id") or "").strip()
         found = _resolve_topup_invoice_details(stripe_client, payment_intent_id)
+        if debug_enabled:
+            logger.warning("[billing_reconcile] pi=%s found_invoice_id=%s found_invoice_number=%s status=%s retry_count=%s next_retry_at=%s", payment_intent_id, found.get("stripe_invoice_id"), found.get("stripe_invoice_number"), status, retry_count, next_retry_raw)
 
         if found.get("stripe_invoice_id"):
             details.update(found)
@@ -238,12 +249,21 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
     if updated:
         db.commit()
 
+    if debug_enabled:
+        logger.warning("[billing_reconcile_summary] scanned=%s resolved=%s marked_anomaly=%s updated=%s skipped_has_invoice=%s skipped_not_due=%s skipped_exhausted=%s now=%s", scanned, resolved, marked_anomaly, updated, skipped_has_invoice, skipped_not_due, skipped_exhausted, now.isoformat())
+
     return {
         "ok": True,
         "scanned": scanned,
         "resolved": resolved,
         "marked_anomaly": marked_anomaly,
         "updated": updated,
+        "debug": {
+            "skipped_has_invoice": skipped_has_invoice,
+            "skipped_not_due": skipped_not_due,
+            "skipped_exhausted": skipped_exhausted,
+            "now": now.isoformat(),
+        },
     }
 
 
