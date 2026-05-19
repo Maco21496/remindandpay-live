@@ -1,9 +1,9 @@
-﻿# app/routers/settings.py
+# app/routers/settings.py
 from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional, List
-from datetime import time as dtime
+from datetime import time as dtime, datetime
 from sqlalchemy.orm import Session
 
 from fastapi import Depends, UploadFile, File
@@ -12,9 +12,10 @@ from zoneinfo import available_timezones
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AppSettings
+from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger, SmsCreditLedger
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
+from ..services.billing_trial import ensure_billing_profile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -211,6 +212,114 @@ def delete_logo(db=Depends(get_db), user=Depends(require_user)):
     db.add(s); db.commit()
     return {"ok": True}
 
+
+
+@router.get("/billing")
+def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_user)):
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
+    if not profile:
+        profile = ensure_billing_profile(db, user)
+        db.commit()
+        db.refresh(profile)
+
+    now = datetime.utcnow()
+    days_left = max(0, (profile.trial_ends_at.date() - now.date()).days) if profile.trial_ends_at else 0
+    effective_status = profile.subscription_status
+    if effective_status == "trialing" and profile.trial_ends_at and profile.trial_ends_at < now:
+        effective_status = "trial_expired"
+
+    return {
+        "trial_days_assigned": profile.trial_days_assigned,
+        "trial_started_at": profile.trial_started_at.isoformat() if profile.trial_started_at else None,
+        "trial_ends_at": profile.trial_ends_at.isoformat() if profile.trial_ends_at else None,
+        "trial_days_left": days_left,
+        "subscription_status": effective_status,
+        "stripe_customer_id": profile.stripe_customer_id,
+        "stripe_subscription_id": profile.stripe_subscription_id,
+    }
+
+
+
+@router.get("/billing/invoices")
+def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=Depends(require_user)):
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
+    if not profile or not profile.stripe_customer_id:
+        return {"invoices": []}
+
+    stripe_client = _get_stripe_client()
+    if not stripe_client.api_key:
+        return {"invoices": []}
+
+    limit = max(1, min(int(limit or 20), 100))
+    invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+
+    refunded_payment_intents = set()
+    refunded_invoice_ids = set()
+    for row in (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .filter(SmsCreditLedger.reason == "stripe_refund_reversal")
+        .all()
+    ):
+        details = row.details if isinstance(row.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "").strip()
+        inv_id = str(details.get("stripe_invoice_id") or "").strip()
+        if pi:
+            refunded_payment_intents.add(pi)
+        if inv_id:
+            refunded_invoice_ids.add(inv_id)
+
+    rows = []
+
+    pi_refund_cache: dict[str, bool] = {}
+
+    def _pi_is_refunded(pi_id: str) -> bool:
+        pi_id = (pi_id or "").strip()
+        if not pi_id:
+            return False
+        if pi_id in pi_refund_cache:
+            return pi_refund_cache[pi_id]
+        try:
+            pi_obj = stripe_client.PaymentIntent.retrieve(pi_id)
+        except Exception:
+            pi_refund_cache[pi_id] = False
+            return False
+
+        # Prefer PaymentIntent-level amount_refunded when available.
+        amount_refunded = int(getattr(pi_obj, "amount_refunded", 0) or 0)
+        if amount_refunded > 0:
+            pi_refund_cache[pi_id] = True
+            return True
+
+        # Fallback: inspect latest charge refund amount.
+        latest_charge = getattr(pi_obj, "latest_charge", None)
+        charge_id = str(getattr(latest_charge, "id", None) or latest_charge or "").strip()
+        if not charge_id:
+            pi_refund_cache[pi_id] = False
+            return False
+        try:
+            ch = stripe_client.Charge.retrieve(charge_id)
+            refunded = int(getattr(ch, "amount_refunded", 0) or 0) > 0
+        except Exception:
+            refunded = False
+        pi_refund_cache[pi_id] = refunded
+        return refunded
+    for inv in invoices.auto_paging_iter():
+        metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
+        inv_sub = getattr(inv, "subscription", None)
+        kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
+        row = _stripe_invoice_to_row(inv, kind=kind)
+        inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
+        inv_id = str(getattr(inv, "id", "") or "").strip()
+        if kind == "topup":
+            if (inv_pi and inv_pi in refunded_payment_intents) or (inv_id and inv_id in refunded_invoice_ids) or _pi_is_refunded(inv_pi):
+                row["status"] = "refunded"
+        rows.append(row)
+
+    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+    return {"invoices": rows[:limit]}
+
+
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):
     stats = run_initial_user_setup(
@@ -221,3 +330,39 @@ def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)
     )
     return {"ok": True, "stats": stats}
 
+
+
+def _stripe_invoice_to_row(inv, *, kind: str) -> dict:
+    return {
+        "id": inv.id,
+        "number": getattr(inv, "number", None),
+        "status": getattr(inv, "status", None),
+        "currency": getattr(inv, "currency", "").upper() if getattr(inv, "currency", None) else None,
+        "amount_due": getattr(inv, "amount_due", None),
+        "amount_paid": getattr(inv, "amount_paid", None),
+        "created": getattr(inv, "created", None),
+        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+        "invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "kind": kind,
+    }
+
+
+def _get_stripe_client():
+    import stripe
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    return stripe
+
+
+
+def _stripe_metadata_dict(raw_metadata) -> dict:
+    if raw_metadata is None:
+        return {}
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    if hasattr(raw_metadata, "to_dict"):
+        converted = raw_metadata.to_dict()
+        if isinstance(converted, dict):
+            return converted
+    if hasattr(raw_metadata, "items"):
+        return {str(k): v for k, v in raw_metadata.items()}
+    return {}
