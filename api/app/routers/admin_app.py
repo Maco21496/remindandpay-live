@@ -29,9 +29,14 @@ def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
     counts: dict[int, int] = {}
     for user_id, details in rows:
         meta = details if isinstance(details, dict) else {}
-        if meta.get("stripe_invoice_id"):
-            continue
-        counts[user_id] = counts.get(user_id, 0) + 1
+        pi = str(meta.get("payment_intent_id") or "").strip()
+        invoice_link = str(meta.get("stripe_invoice_pdf") or meta.get("stripe_invoice_url") or "").strip()
+
+        # Real issues only:
+        # 1) No PI reference (payment cannot be verified), or
+        # 2) PI exists but we still have no invoice link AND not PI-verified.
+        if not pi or (not invoice_link and not meta.get("payment_verified")):
+            counts[user_id] = counts.get(user_id, 0) + 1
     return counts
 
 
@@ -511,10 +516,10 @@ def admin_billing_topup_anomalies(
     anomalies = []
     for row in rows:
         details = dict(row.details) if isinstance(row.details, dict) else {}
-        if details.get("stripe_invoice_id"):
-            continue
         status = str(details.get("invoice_reconcile_status") or "pending")
-        if status == "verified_no_invoice" and details.get("payment_verified") is True:
+        pi = str(details.get("payment_intent_id") or "").strip()
+        invoice_link = str(details.get("stripe_invoice_pdf") or details.get("stripe_invoice_url") or "").strip()
+        if pi and (invoice_link or details.get("payment_verified") is True):
             continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
@@ -669,10 +674,10 @@ def admin_reconcile_topup_anomalies(
 
     for row in rows:
         details = dict(row.details) if isinstance(row.details, dict) else {}
-        if details.get("stripe_invoice_id"):
-            continue
         status = str(details.get("invoice_reconcile_status") or "pending")
-        if status == "verified_no_invoice" and details.get("payment_verified") is True:
+        pi = str(details.get("payment_intent_id") or "").strip()
+        invoice_link = str(details.get("stripe_invoice_pdf") or details.get("stripe_invoice_url") or "").strip()
+        if pi and (invoice_link or details.get("payment_verified") is True):
             continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
