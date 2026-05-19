@@ -153,7 +153,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         _handle_invoice_paid(db, event)
     elif event_type == "invoice.payment_failed":
         _handle_invoice_payment_failed(db, event)
-    elif event_type in {"payment_intent.payment_failed", "charge.refunded"}:
+    elif event_type == "charge.refunded":
+        _handle_charge_refunded(db, event)
+    elif event_type in {"payment_intent.payment_failed"}:
         pass
 
     return {"ok": True}
@@ -243,6 +245,69 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
         "marked_anomaly": marked_anomaly,
         "updated": updated,
     }
+
+
+def _handle_charge_refunded(db: Session, event: dict):
+    obj = event["data"]["object"]
+    payment_intent_id = _stripe_obj_id(getattr(obj, "payment_intent", None))
+    refund_id = _stripe_obj_id(getattr(obj, "id", None))
+    if not payment_intent_id or not refund_id:
+        return
+
+    # Idempotency: one compensating debit per refund event.
+    refund_ref = f"stripe:refund:{refund_id}"
+    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == refund_ref).first():
+        return
+
+    credits = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    matched = []
+    for row in credits:
+        details = row.details if isinstance(row.details, dict) else {}
+        if str(details.get("payment_intent_id") or "").strip() == payment_intent_id and row.entry_type == "credit":
+            matched.append(row)
+    if not matched:
+        return
+
+    total_credits = sum(int(r.amount or 0) for r in matched)
+    if total_credits <= 0:
+        return
+
+    amount_refunded = int(getattr(obj, "amount_refunded", 0) or 0)
+    amount_captured = int(getattr(obj, "amount_captured", 0) or 0)
+    if amount_refunded <= 0:
+        return
+
+    # Full refund -> full credit reversal; partial refund -> proportional reversal.
+    if amount_captured > 0 and amount_refunded < amount_captured:
+        to_reverse = max(1, int((total_credits * amount_refunded) / amount_captured))
+    else:
+        to_reverse = total_credits
+
+    user_id = matched[0].user_id
+    db.add(
+        SmsCreditLedger(
+            user_id=user_id,
+            entry_type="debit",
+            amount=to_reverse,
+            reason="stripe_refund_reversal",
+            reference_id=refund_ref,
+            details={
+                "stripe_event_id": event["id"],
+                "payment_intent_id": payment_intent_id,
+                "stripe_charge_id": _stripe_obj_id(getattr(obj, "charge", None)),
+                "stripe_refund_id": refund_id,
+                "amount_refunded": amount_refunded,
+                "amount_captured": amount_captured,
+                "source": "stripe_webhook_refund",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    )
+    db.commit()
 
 
 def _handle_checkout_completed(db: Session, event: dict):
