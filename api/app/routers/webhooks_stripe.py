@@ -281,6 +281,8 @@ def _handle_charge_refunded(db: Session, event: dict):
     if amount_refunded <= 0:
         return
 
+    invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
+
     # Full refund -> full credit reversal; partial refund -> proportional reversal.
     if amount_captured > 0 and amount_refunded < amount_captured:
         to_reverse = max(1, int((total_credits * amount_refunded) / amount_captured))
@@ -300,6 +302,8 @@ def _handle_charge_refunded(db: Session, event: dict):
                 "payment_intent_id": payment_intent_id,
                 "stripe_charge_id": _stripe_obj_id(getattr(obj, "charge", None)),
                 "stripe_refund_id": refund_id,
+                "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
+                "stripe_invoice_number": invoice_details.get("stripe_invoice_number"),
                 "amount_refunded": amount_refunded,
                 "amount_captured": amount_captured,
                 "source": "stripe_webhook_refund",

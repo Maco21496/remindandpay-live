@@ -255,14 +255,21 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     limit = max(1, min(int(limit or 20), 100))
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
-    refunded_payment_intents = {
-        str((row.details or {}).get("payment_intent_id") or "").strip()
-        for row in db.query(SmsCreditLedger)
+    refunded_payment_intents = set()
+    refunded_invoice_ids = set()
+    for row in (
+        db.query(SmsCreditLedger)
         .filter(SmsCreditLedger.user_id == user.id)
         .filter(SmsCreditLedger.reason == "stripe_refund_reversal")
         .all()
-        if isinstance(row.details, dict)
-    }
+    ):
+        details = row.details if isinstance(row.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "").strip()
+        inv_id = str(details.get("stripe_invoice_id") or "").strip()
+        if pi:
+            refunded_payment_intents.add(pi)
+        if inv_id:
+            refunded_invoice_ids.add(inv_id)
 
     rows = []
     for inv in invoices.auto_paging_iter():
@@ -271,7 +278,8 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
         row = _stripe_invoice_to_row(inv, kind=kind)
         inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        if kind == "topup" and inv_pi and inv_pi in refunded_payment_intents:
+        inv_id = str(getattr(inv, "id", "") or "").strip()
+        if kind == "topup" and ((inv_pi and inv_pi in refunded_payment_intents) or (inv_id and inv_id in refunded_invoice_ids)):
             row["status"] = "refunded"
         rows.append(row)
 
