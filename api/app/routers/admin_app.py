@@ -514,6 +514,8 @@ def admin_billing_topup_anomalies(
         if details.get("stripe_invoice_id"):
             continue
         status = str(details.get("invoice_reconcile_status") or "pending")
+        if status == "verified_no_invoice" and details.get("payment_verified") is True:
+            continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
         anomalies.append({
@@ -589,10 +591,35 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str, 
                             inv = candidate
                             invoice_id = str(getattr(inv, "id", "") or "").strip()
                             break
+
+                        # Some Stripe shapes keep PI link only on the charge attached to invoice.
+                        candidate_charge = str(getattr(getattr(candidate, "charge", None), "id", None) or getattr(candidate, "charge", "") or "").strip()
+                        if candidate_charge:
+                            try:
+                                ch2 = stripe_client.Charge.retrieve(candidate_charge)
+                                ch2_pi = str(getattr(getattr(ch2, "payment_intent", None), "id", None) or getattr(ch2, "payment_intent", "") or "").strip()
+                                if ch2_pi == payment_intent_id:
+                                    inv = candidate
+                                    invoice_id = str(getattr(inv, "id", "") or "").strip()
+                                    break
+                            except Exception:
+                                pass
                 except Exception as ex:
                     debug["list_error"] = str(ex)
 
     if not invoice_id:
+        pi_status = str(getattr(pi, "status", "") or "") if pi is not None else ""
+        if pi is not None and pi_status == "succeeded":
+            result = {
+                "invoice_reconcile_status": "verified_no_invoice",
+                "payment_verified": True,
+                "invoice_retry_count": 0,
+                "invoice_retry_max_attempts": 5,
+                "next_retry_at": None,
+            }
+            if include_debug:
+                result["debug"] = debug
+            return result
         if include_debug:
             return {"debug": debug}
         return {}
@@ -645,6 +672,8 @@ def admin_reconcile_topup_anomalies(
         if details.get("stripe_invoice_id"):
             continue
         status = str(details.get("invoice_reconcile_status") or "pending")
+        if status == "verified_no_invoice" and details.get("payment_verified") is True:
+            continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
 
@@ -669,6 +698,16 @@ def admin_reconcile_topup_anomalies(
             details["invoice_reconcile_status"] = "resolved"
             details["next_retry_at"] = None
             resolved += 1
+            if apply_changes:
+                row.details = details
+                db.add(row)
+                updated += 1
+            continue
+
+        if found.get("invoice_reconcile_status") == "verified_no_invoice":
+            details.update(found)
+            details["invoice_reconcile_status"] = "verified_no_invoice"
+            details["next_retry_at"] = None
             if apply_changes:
                 row.details = details
                 db.add(row)

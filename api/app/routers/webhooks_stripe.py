@@ -485,10 +485,33 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
                             inv = candidate
                             invoice_id = _stripe_obj_id(candidate)
                             break
+
+                        # Some Stripe shapes keep PI link only on the charge attached to invoice.
+                        candidate_charge = _stripe_obj_id(getattr(candidate, "charge", None))
+                        if candidate_charge:
+                            try:
+                                ch2 = stripe_client.Charge.retrieve(candidate_charge)
+                                ch2_pi = _stripe_obj_id(getattr(ch2, "payment_intent", None))
+                                if ch2_pi == payment_intent_id:
+                                    inv = candidate
+                                    invoice_id = _stripe_obj_id(candidate)
+                                    break
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
     if not invoice_id:
+        # If PI exists and succeeded, treat as payment-verified even if no invoice object is linkable.
+        pi_status = str(getattr(pi, "status", "") or "") if pi is not None else ""
+        if pi is not None and pi_status == "succeeded":
+            return {
+                "invoice_reconcile_status": "verified_no_invoice",
+                "payment_verified": True,
+                "invoice_retry_count": 0,
+                "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
+                "next_retry_at": None,
+            }
         return {
             "invoice_reconcile_status": "pending",
             "invoice_retry_count": 0,
