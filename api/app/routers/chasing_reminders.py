@@ -14,6 +14,7 @@ from sqlalchemy import func, select, text as sqltext
 
 from ..database import get_db
 from .auth import require_user
+from ..services.billing_trial import assert_billing_allows_sending
 from ..models import (
     ReminderRule,      # scheduling rule for chasing
     ChasingPlan,       # was ReminderSequence
@@ -546,6 +547,11 @@ def send_now(
     db: Session = Depends(get_db),
     user = Depends(require_user),
 ):
+    try:
+        assert_billing_allows_sending(db, user)
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     now = datetime.utcnow()
 
     # build eligible customer pool
