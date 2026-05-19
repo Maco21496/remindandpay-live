@@ -1,7 +1,7 @@
 # FINAL VERSION OF api/app/routers/admin_app.py
 from typing import List
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,12 +9,28 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..database import get_db
-from ..models import SmsWebhookLog, User
+from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger
+from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
 from ..shared import templates
 from .auth import require_owner
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
+    rows = (
+        db.query(SmsCreditLedger.user_id, SmsCreditLedger.details)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    counts: dict[int, int] = {}
+    for user_id, details in rows:
+        meta = details if isinstance(details, dict) else {}
+        if meta.get("stripe_invoice_id"):
+            continue
+        counts[user_id] = counts.get(user_id, 0) + 1
+    return counts
 
 
 def _render_admin_dashboard(request: Request, db: Session, owner: User):
@@ -29,6 +45,7 @@ def _render_admin_dashboard(request: Request, db: Session, owner: User):
     )
 
     active_tab = request.query_params.get("tab", "users")
+    topup_anomaly_counts = _topup_anomaly_counts_by_user(db)
 
     return templates.TemplateResponse(
         "admin_dashboard.html",
@@ -37,6 +54,7 @@ def _render_admin_dashboard(request: Request, db: Session, owner: User):
             "users": users,
             "owner_email": (owner.email or "").strip().lower(),
             "active_tab": active_tab,
+            "topup_anomaly_counts": topup_anomaly_counts,
         },
     )
 
@@ -368,3 +386,274 @@ def admin_test_notification_template(
     )
     db.commit()
     return {"ok": True, "queued_to": to_email}
+
+
+@router.get("/billing/settings")
+def admin_get_billing_settings(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(BillingSettings).order_by(BillingSettings.id.asc()).first()
+    if not row:
+        row = BillingSettings(default_trial_days=30)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return {
+        "default_trial_days": int(row.default_trial_days or 30),
+        "updated_by_user_id": row.updated_by_user_id,
+        "updated_at": row.updated_at,
+    }
+
+
+@router.post("/billing/settings")
+def admin_update_billing_settings(
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    default_trial_days = payload.get("default_trial_days")
+    if default_trial_days is None:
+        raise HTTPException(status_code=400, detail="default_trial_days is required")
+    try:
+        default_trial_days = int(default_trial_days)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="default_trial_days must be an integer")
+    if default_trial_days < 0:
+        raise HTTPException(status_code=400, detail="default_trial_days must be >= 0")
+
+    row = db.query(BillingSettings).order_by(BillingSettings.id.asc()).first()
+    if not row:
+        row = BillingSettings(default_trial_days=default_trial_days, updated_by_user_id=owner.id)
+        db.add(row)
+    else:
+        row.default_trial_days = default_trial_days
+        row.updated_by_user_id = owner.id
+    db.commit()
+    return {"ok": True, "default_trial_days": default_trial_days}
+
+
+@router.get("/billing/users/{user_id}")
+def admin_get_user_billing_profile(
+    user_id: int,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Billing profile not found")
+    return {
+        "user_id": row.user_id,
+        "trial_days_assigned": row.trial_days_assigned,
+        "trial_started_at": row.trial_started_at,
+        "trial_ends_at": row.trial_ends_at,
+        "subscription_status": row.subscription_status,
+        "stripe_customer_id": row.stripe_customer_id,
+        "stripe_subscription_id": row.stripe_subscription_id,
+    }
+
+
+@router.post("/billing/users/{user_id}")
+def admin_update_user_billing_profile(
+    user_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    row = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Billing profile not found")
+
+    if "trial_days_assigned" in payload:
+        try:
+            trial_days = int(payload.get("trial_days_assigned"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="trial_days_assigned must be an integer")
+        if trial_days < 0:
+            raise HTTPException(status_code=400, detail="trial_days_assigned must be >= 0")
+        row.trial_days_assigned = trial_days
+        row.trial_ends_at = row.trial_started_at + timedelta(days=trial_days)
+
+    if "trial_ends_at" in payload and payload.get("trial_ends_at"):
+        row.trial_ends_at = datetime.fromisoformat(str(payload.get("trial_ends_at")))
+
+    if "subscription_status" in payload and payload.get("subscription_status"):
+        row.subscription_status = str(payload.get("subscription_status"))
+
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/billing/notifications/enqueue")
+def admin_enqueue_billing_trial_notifications(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    result = enqueue_trial_notifications(db)
+    return {"ok": True, **result}
+
+
+@router.get("/billing/topup-anomalies")
+def admin_billing_topup_anomalies(
+    limit: int = 200,
+    user_id: int | None = None,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    limit = max(1, min(int(limit or 200), 1000))
+    q = db.query(SmsCreditLedger).filter(SmsCreditLedger.reason == "stripe_topup")
+    if user_id is not None:
+        q = q.filter(SmsCreditLedger.user_id == user_id)
+    rows = q.order_by(SmsCreditLedger.created_at.desc()).limit(limit).all()
+
+    anomalies = []
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        if details.get("stripe_invoice_id"):
+            continue
+        status = str(details.get("invoice_reconcile_status") or "pending")
+        retry_count = int(details.get("invoice_retry_count") or 0)
+        max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
+        anomalies.append({
+            "ledger_id": row.id,
+            "user_id": row.user_id,
+            "created_at": row.created_at,
+            "amount": row.amount,
+            "reference_id": row.reference_id,
+            "payment_intent_id": details.get("payment_intent_id"),
+            "stripe_session_id": details.get("stripe_session_id"),
+            "invoice_reconcile_status": status,
+            "invoice_retry_count": retry_count,
+            "invoice_retry_max_attempts": max_attempts,
+            "next_retry_at": details.get("next_retry_at"),
+        })
+
+    return {
+        "count": len(anomalies),
+        "anomalies": anomalies,
+    }
+
+
+
+def _retry_delay_for_attempt(attempt: int) -> timedelta:
+    # Attempt numbers are 1-indexed for retries after initial insert.
+    schedule = {
+        1: timedelta(minutes=15),
+        2: timedelta(hours=1),
+        3: timedelta(hours=4),
+        4: timedelta(hours=12),
+        5: timedelta(hours=24),
+    }
+    return schedule.get(attempt, timedelta(hours=24))
+
+
+def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) -> dict:
+    payment_intent_id = (payment_intent_id or "").strip()
+    if not payment_intent_id:
+        return {}
+    try:
+        pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
+    except Exception:
+        return {}
+
+    invoice_id = str(getattr(getattr(pi, "invoice", None), "id", None) or getattr(pi, "invoice", "") or "").strip()
+    if not invoice_id:
+        charge_id = str(getattr(getattr(pi, "latest_charge", None), "id", None) or getattr(pi, "latest_charge", "") or "").strip()
+        if charge_id:
+            try:
+                ch = stripe_client.Charge.retrieve(charge_id)
+                invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
+            except Exception:
+                pass
+    if not invoice_id:
+        return {}
+    try:
+        inv = stripe_client.Invoice.retrieve(invoice_id)
+    except Exception:
+        return {"stripe_invoice_id": invoice_id}
+    return {
+        "stripe_invoice_id": invoice_id,
+        "stripe_invoice_number": getattr(inv, "number", None),
+        "stripe_invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "stripe_invoice_url": getattr(inv, "hosted_invoice_url", None),
+    }
+
+
+@router.post("/billing/topup-anomalies/reconcile")
+def admin_reconcile_topup_anomalies(
+    limit: int = 200,
+    user_id: int | None = None,
+    apply_changes: bool = True,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    import stripe
+
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
+
+    limit = max(1, min(int(limit or 200), 1000))
+    q = db.query(SmsCreditLedger).filter(SmsCreditLedger.reason == "stripe_topup")
+    if user_id is not None:
+        q = q.filter(SmsCreditLedger.user_id == user_id)
+    rows = q.order_by(SmsCreditLedger.created_at.desc()).limit(limit).all()
+
+    scanned = 0
+    resolved = 0
+    anomalies = 0
+    updated = 0
+    now = datetime.now(timezone.utc)
+
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        if details.get("stripe_invoice_id"):
+            continue
+        status = str(details.get("invoice_reconcile_status") or "pending")
+        retry_count = int(details.get("invoice_retry_count") or 0)
+        max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
+
+        scanned += 1
+        retry_count = int(details.get("invoice_retry_count") or 0)
+        max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
+        payment_intent_id = str(details.get("payment_intent_id") or "").strip()
+
+        found = _resolve_topup_invoice_details_admin(stripe, payment_intent_id)
+        if found.get("stripe_invoice_id"):
+            details.update(found)
+            details["invoice_reconcile_status"] = "resolved"
+            details["next_retry_at"] = None
+            resolved += 1
+            if apply_changes:
+                row.details = details
+                db.add(row)
+                updated += 1
+            continue
+
+        retry_count += 1
+        details["invoice_retry_count"] = retry_count
+        details["invoice_retry_max_attempts"] = max_attempts
+        if retry_count >= max_attempts:
+            details["invoice_reconcile_status"] = "anomaly"
+            details["next_retry_at"] = None
+            anomalies += 1
+        else:
+            details["invoice_reconcile_status"] = "pending"
+            details["next_retry_at"] = (now + _retry_delay_for_attempt(retry_count)).isoformat()
+
+        if apply_changes:
+            row.details = details
+            db.add(row)
+            updated += 1
+
+    if apply_changes and updated:
+        db.commit()
+
+    return {
+        "ok": True,
+        "apply_changes": apply_changes,
+        "scanned": scanned,
+        "resolved": resolved,
+        "anomalies": anomalies,
+        "updated": updated,
+    }
