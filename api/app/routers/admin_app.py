@@ -35,21 +35,6 @@ def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
     return counts
 
 
-def _topup_anomaly_counts_by_user(db: Session) -> dict[int, int]:
-    rows = (
-        db.query(SmsCreditLedger.user_id, SmsCreditLedger.details)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .all()
-    )
-    counts: dict[int, int] = {}
-    for user_id, details in rows:
-        meta = details if isinstance(details, dict) else {}
-        if meta.get("stripe_invoice_id"):
-            continue
-        counts[user_id] = counts.get(user_id, 0) + 1
-    return counts
-
-
 def _render_admin_dashboard(request: Request, db: Session, owner: User):
     """
     Owner-only management screen for all users.
@@ -564,11 +549,12 @@ def _retry_delay_for_attempt(attempt: int) -> timedelta:
     return schedule.get(attempt, timedelta(hours=24))
 
 
-def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) -> dict:
+def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str, *, include_debug: bool = False) -> dict:
     payment_intent_id = (payment_intent_id or "").strip()
     if not payment_intent_id:
         return {}
 
+    debug = {"list_error": None, "pi_error": None, "charge_error": None, "list_count": 0}
     invoice_id = ""
     inv = None
 
@@ -578,15 +564,17 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) 
         items = getattr(lst, "data", None) or []
         if items:
             inv = items[0]
+            debug["list_count"] = len(items)
             invoice_id = str(getattr(inv, "id", "") or "").strip()
-    except Exception:
-        pass
+    except Exception as ex:
+        debug["list_error"] = str(ex)
 
     # Fallback path if list() did not return an invoice.
     if not invoice_id:
         try:
             pi = stripe_client.PaymentIntent.retrieve(payment_intent_id)
-        except Exception:
+        except Exception as ex:
+            debug["pi_error"] = str(ex)
             pi = None
 
         if pi is not None:
@@ -597,22 +585,27 @@ def _resolve_topup_invoice_details_admin(stripe_client, payment_intent_id: str) 
                     try:
                         ch = stripe_client.Charge.retrieve(charge_id)
                         invoice_id = str(getattr(getattr(ch, "invoice", None), "id", None) or getattr(ch, "invoice", "") or "").strip()
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        debug["charge_error"] = str(ex)
 
     if not invoice_id:
+        if include_debug:
+            return {"debug": debug}
         return {}
     if inv is None:
         try:
             inv = stripe_client.Invoice.retrieve(invoice_id)
         except Exception:
             return {"stripe_invoice_id": invoice_id}
-    return {
+    result = {
         "stripe_invoice_id": invoice_id,
         "stripe_invoice_number": getattr(inv, "number", None),
         "stripe_invoice_pdf": getattr(inv, "invoice_pdf", None),
         "stripe_invoice_url": getattr(inv, "hosted_invoice_url", None),
     }
+    if include_debug:
+        result["debug"] = debug
+    return result
 
 
 @router.post("/billing/topup-anomalies/reconcile")
@@ -656,7 +649,7 @@ def admin_reconcile_topup_anomalies(
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
         payment_intent_id = str(details.get("payment_intent_id") or "").strip()
 
-        found = _resolve_topup_invoice_details_admin(stripe, payment_intent_id)
+        found = _resolve_topup_invoice_details_admin(stripe, payment_intent_id, include_debug=debug_enabled)
         if debug_enabled and len(debug_rows) < 50:
             debug_rows.append({
                 "ledger_id": row.id,
@@ -665,6 +658,7 @@ def admin_reconcile_topup_anomalies(
                 "found_invoice_number": found.get("stripe_invoice_number"),
                 "prev_status": status,
                 "prev_retry_count": retry_count,
+                "resolver_debug": found.get("debug") if isinstance(found, dict) else None,
             })
         if found.get("stripe_invoice_id"):
             details.update(found)
