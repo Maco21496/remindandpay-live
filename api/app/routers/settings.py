@@ -1,6 +1,7 @@
 # app/routers/settings.py
 from __future__ import annotations
 import os
+import logging
 from pathlib import Path
 from typing import Optional, List
 from datetime import time as dtime, datetime
@@ -18,6 +19,7 @@ from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR   = PROJECT_ROOT / "web" / "static"
