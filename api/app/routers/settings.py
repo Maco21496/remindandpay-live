@@ -411,6 +411,141 @@ def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(
         "credit_note_pdf": getattr(cn, "pdf", None),
     }
 
+    details = dict(row.details) if isinstance(row.details, dict) else {}
+    stripe_invoice_number = getattr(inv, "number", None) or details.get("stripe_invoice_number")
+
+    return {
+        "available": bool(getattr(inv, "invoice_pdf", None) or getattr(inv, "hosted_invoice_url", None)),
+        "stripe_invoice_id": row.stripe_invoice_id,
+        "stripe_invoice_number": stripe_invoice_number,
+        "invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+    }
+
+
+@router.get("/billing/documents/credit-note/{transaction_id}")
+def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = (
+        db.query(AccountBillingTransaction)
+        .filter(
+            AccountBillingTransaction.id == transaction_id,
+            AccountBillingTransaction.user_id == user.id,
+        )
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if not row.stripe_credit_note_id:
+        return {
+            "available": False,
+            "message": "Credit note is unavailable for this transaction.",
+        }
+
+    stripe_client = _get_stripe_client()
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if not row.stripe_credit_note_id:
+        return {
+            "available": False,
+            "message": "Credit note is unavailable for this transaction.",
+        }
+
+    stripe_client = _get_stripe_client()
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
+
+    return {
+        "available": bool(getattr(inv, "invoice_pdf", None) or getattr(inv, "hosted_invoice_url", None)),
+        "stripe_invoice_id": row.stripe_invoice_id,
+        "stripe_invoice_number": stripe_invoice_number,
+        "invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+    }
+
+
+@router.get("/billing/documents/credit-note/{transaction_id}")
+def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = (
+        db.query(AccountBillingTransaction)
+        .filter(
+            AccountBillingTransaction.id == transaction_id,
+            AccountBillingTransaction.user_id == user.id,
+        )
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if not row.stripe_credit_note_id:
+        return {
+            "available": False,
+            "message": "Credit note is unavailable for this transaction.",
+        }
+
+    stripe_client = _get_stripe_client()
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
 
 @router.post("/restore_defaults")
 def restore_defaults(db: Session = Depends(get_db), user = Depends(require_user)):
