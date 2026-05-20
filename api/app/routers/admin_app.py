@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
+from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
-from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger
+from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger, AccountBillingTransaction
 from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
 from ..shared import templates, BaseModel
@@ -742,41 +743,80 @@ def admin_user_invoices(
     import stripe
 
     stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
-
-    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
-    if not profile or not profile.stripe_customer_id:
-        return {"invoices": []}
+    stripe_client = stripe if stripe.api_key else None
 
     limit = max(1, min(int(limit or 30), 100))
-    invoices = stripe.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+    payment_rows = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.user_id == user_id)
+        .filter(AccountBillingTransaction.transaction_type == "payment")
+        .filter(AccountBillingTransaction.product_type == "sms_topup")
+        .filter(AccountBillingTransaction.status.in_(["succeeded", "partially_refunded"]))
+        .filter(AccountBillingTransaction.stripe_payment_intent_id.isnot(None))
+        .order_by(AccountBillingTransaction.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
     rows = []
-    for inv in invoices.auto_paging_iter():
-        inv_id = str(getattr(inv, "id", "") or "")
-        inv_number = str(getattr(inv, "number", "") or "")
-        inv_status = str(getattr(inv, "status", "") or "")
-        inv_pi = str(getattr(getattr(inv, "payment_intent", None), "id", None) or getattr(inv, "payment_intent", "") or "")
+    for tx in payment_rows:
+        total_minor = abs(int(tx.amount_minor or 0))
+        refunded_minor = (
+            db.query(func.coalesce(func.sum(func.abs(AccountBillingTransaction.amount_minor)), 0))
+            .filter(AccountBillingTransaction.parent_transaction_id == tx.id)
+            .filter(AccountBillingTransaction.transaction_type == "refund")
+            .filter(AccountBillingTransaction.status.in_(["succeeded", "pending"]))
+            .scalar()
+            or 0
+        )
+        refundable_minor = max(0, total_minor - int(refunded_minor))
+        if refundable_minor <= 0:
+            continue
+
+        details = dict(tx.details) if isinstance(tx.details, dict) else {}
+        stripe_invoice_number = details.get("stripe_invoice_number")
+        if not stripe_invoice_number and tx.stripe_invoice_id and stripe_client is not None:
+            try:
+                inv = stripe_client.Invoice.retrieve(tx.stripe_invoice_id)
+                stripe_invoice_number = getattr(inv, "number", None)
+                if stripe_invoice_number:
+                    details["stripe_invoice_number"] = stripe_invoice_number
+                    tx.details = details
+                    db.add(tx)
+            except Exception:
+                pass
+        number = stripe_invoice_number or tx.stripe_invoice_id or str(tx.id)
         rows.append({
-            "id": inv_id,
-            "number": inv_number,
-            "status": inv_status,
-            "created": getattr(inv, "created", None),
-            "amount_due": getattr(inv, "amount_due", None),
-            "currency": getattr(inv, "currency", None),
-            "payment_intent_id": inv_pi,
-            "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+            "id": tx.id,
+            "billing_transaction_id": tx.id,
+            "number": number,
+            "created": int(tx.created_at.timestamp()) if tx.created_at else None,
+            "status": tx.status,
+            "currency": (tx.currency or "").upper(),
+            "amount_due": total_minor,
+            "amount_minor": tx.amount_minor,
+            "amount_refunded": int(refunded_minor),
+            "refundable_amount_minor": refundable_minor,
+            "product_code": tx.product_code,
+            "quantity": tx.quantity,
+            "stripe_invoice_id": tx.stripe_invoice_id,
+            "stripe_payment_intent_id": tx.stripe_payment_intent_id,
         })
 
-    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+    db.commit()
     return {"invoices": rows[:limit]}
 
 
 class AdminRefundTopupIn(BaseModel):
     user_id: int
-    invoice_id: str
+    billing_transaction_id: int | None = None
+    invoice_id: str | None = None
     amount_pence: int | None = None
     reason: str | None = None
+
+
+def _is_valid_refund_id(refund_id: str) -> bool:
+    return str(refund_id or "").strip().startswith("re_")
 
 
 @router.post("/billing/refund-topup")
@@ -791,94 +831,199 @@ def admin_refund_topup(
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
-    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == payload.user_id).first()
-    if not profile or not profile.stripe_customer_id:
-        raise HTTPException(status_code=404, detail="Billing profile/customer not found")
+    tx_id = payload.billing_transaction_id
+    if tx_id is None and payload.invoice_id is not None:
+        raw = str(payload.invoice_id).strip()
+        if raw.isdigit():
+            tx_id = int(raw)
+    if tx_id is None:
+        raise HTTPException(status_code=400, detail="billing_transaction_id is required")
 
-    invoice = stripe.Invoice.retrieve(payload.invoice_id)
-    inv_customer = str(getattr(getattr(invoice, "customer", None), "id", None) or getattr(invoice, "customer", "") or "").strip()
-    if inv_customer != str(profile.stripe_customer_id or "").strip():
-        raise HTTPException(status_code=400, detail="Invoice does not belong to requested user")
+    original = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.id == tx_id, AccountBillingTransaction.user_id == payload.user_id)
+        .first()
+    )
+    if not original:
+        raise HTTPException(status_code=404, detail="Original payment transaction not found")
+    if original.transaction_type != "payment" or original.product_type != "sms_topup":
+        raise HTTPException(status_code=400, detail="Selected transaction is not a refundable sms top-up payment")
+    if original.status not in {"succeeded", "partially_refunded"}:
+        raise HTTPException(status_code=400, detail="Selected transaction is not refundable")
 
-    pi_id = str(getattr(getattr(invoice, "payment_intent", None), "id", None) or getattr(invoice, "payment_intent", "") or "").strip()
+    pi_id = str(original.stripe_payment_intent_id or "").strip()
     if not pi_id:
-        raise HTTPException(status_code=400, detail="Invoice has no payment_intent")
+        raise HTTPException(status_code=400, detail="Selected transaction is missing Stripe payment reference")
+
+    already_refunded = (
+        db.query(func.coalesce(func.sum(func.abs(AccountBillingTransaction.amount_minor)), 0))
+        .filter(AccountBillingTransaction.parent_transaction_id == original.id)
+        .filter(AccountBillingTransaction.transaction_type == "refund")
+        .filter(AccountBillingTransaction.status.in_(["succeeded", "pending"]))
+        .filter(AccountBillingTransaction.stripe_refund_id.like("re_%"))
+        .scalar()
+        or 0
+    )
+    total_minor = abs(int(original.amount_minor or 0))
+    refundable_minor = max(0, total_minor - int(already_refunded))
+    if refundable_minor <= 0:
+        raise HTTPException(status_code=400, detail="Transaction is already fully refunded")
 
     refund_kwargs = {"payment_intent": pi_id}
     if payload.amount_pence and int(payload.amount_pence) > 0:
-        refund_kwargs["amount"] = int(payload.amount_pence)
+        req_amount = int(payload.amount_pence)
+        if req_amount > refundable_minor:
+            raise HTTPException(status_code=400, detail="Requested refund amount exceeds refundable amount")
+        refund_kwargs["amount"] = req_amount
     refund = stripe.Refund.create(**refund_kwargs)
+    refund_id = str(getattr(refund, "id", "") or "").strip()
+    if not _is_valid_refund_id(refund_id):
+        raise HTTPException(status_code=500, detail=f"Stripe returned invalid refund id: {refund_id}")
 
-    # Create credit note tied to invoice for accounting visibility.
-    credit_note_kwargs = {
-        "invoice": payload.invoice_id,
-        "reason": "requested_by_customer",
-        "memo": (payload.reason or "Admin-approved refund").strip()[:500],
-    }
-    if payload.amount_pence and int(payload.amount_pence) > 0:
-        credit_note_kwargs["amount"] = int(payload.amount_pence)
     credit_note = None
+    credit_note_error = None
     try:
-        credit_note = stripe.CreditNote.create(**credit_note_kwargs)
-    except Exception:
-        # Keep refund successful even if credit note creation is unavailable for this invoice shape.
+        if original.stripe_invoice_id:
+            refund_amount_minor = int(getattr(refund, "amount", 0) or 0)
+            credit_note_kwargs = {
+                "invoice": original.stripe_invoice_id,
+                "amount": refund_amount_minor,
+                "reason": "order_change",
+                "memo": (payload.reason or "Admin-approved refund").strip()[:500],
+                "refunds": [{"type": "refund", "refund": refund_id, "amount_refunded": refund_amount_minor}],
+                "metadata": {"source": "admin_refund_api", "billing_transaction_id": str(original.id), "user_id": str(original.user_id)},
+            }
+            credit_note = stripe.CreditNote.create(**credit_note_kwargs)
+    except Exception as exc:
         credit_note = None
+        credit_note_error = f"{exc.__class__.__name__}: {exc}"
 
-    # Local ledger update mirrors webhook behavior immediately.
-    credits = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.user_id == payload.user_id)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .all()
+    amount_refunded = int(getattr(refund, "amount", 0) or 0)
+    amount_total = max(1, int(abs(original.amount_minor or 0)))
+    quantity = int(original.quantity or 0)
+    reversal_quantity = quantity if amount_refunded >= amount_total else max(1, int((quantity * amount_refunded) / amount_total))
+
+    credit_note_id = str(getattr(credit_note, "id", "") or "") if credit_note is not None else None
+    credit_note_number = str(getattr(credit_note, "number", "") or "") if credit_note is not None else None
+    credit_note_pdf = str(getattr(credit_note, "pdf", "") or "") if credit_note is not None else None
+    credit_note_status = str(getattr(credit_note, "status", "") or "") if credit_note is not None else None
+    idem_key = f"stripe:refund:{refund_id}"
+    existing_refund_txn = (
+        db.query(AccountBillingTransaction)
+        .filter(
+            (AccountBillingTransaction.stripe_refund_id == refund_id)
+            | (AccountBillingTransaction.idempotency_key == idem_key)
+        )
+        .first()
     )
-    matched = []
-    for row in credits:
-        details = dict(row.details) if isinstance(row.details, dict) else {}
-        if str(details.get("payment_intent_id") or "").strip() == pi_id and row.entry_type == "credit":
-            matched.append(row)
+    idempotent_reused = False
+    if existing_refund_txn:
+        txn = existing_refund_txn
+        idempotent_reused = True
+        if credit_note_id and not txn.stripe_credit_note_id:
+            txn.stripe_credit_note_id = credit_note_id
+        txn_details = dict(txn.details) if isinstance(txn.details, dict) else {}
+        if credit_note_number:
+            txn_details["stripe_credit_note_number"] = credit_note_number
+        if credit_note_pdf:
+            txn_details["credit_note_pdf"] = credit_note_pdf
+        if credit_note_status:
+            txn_details["credit_note_status"] = credit_note_status
+        if credit_note_error:
+            txn_details["credit_note_error"] = credit_note_error
+        txn.details = txn_details
+        db.add(txn)
+    else:
+        txn = AccountBillingTransaction(
+        user_id=original.user_id,
+        initiated_by_user_id=owner.id,
+        transaction_type="refund",
+        product_type=original.product_type,
+        product_code=original.product_code,
+        description=f"Admin refund for transaction #{original.id}",
+        status="succeeded",
+        amount_minor=-abs(amount_refunded),
+        currency=original.currency,
+        quantity=reversal_quantity,
+        parent_transaction_id=original.id,
+        stripe_customer_id=original.stripe_customer_id,
+        stripe_payment_intent_id=pi_id,
+        stripe_invoice_id=original.stripe_invoice_id,
+        stripe_refund_id=refund_id,
+        stripe_credit_note_id=credit_note_id,
+        idempotency_key=idem_key,
+        details={
+            "source": "admin_refund_api",
+            **({"stripe_credit_note_number": credit_note_number} if credit_note_number else {}),
+            **({"credit_note_pdf": credit_note_pdf} if credit_note_pdf else {}),
+            **({"credit_note_status": credit_note_status} if credit_note_status else {}),
+            **({"credit_note_error": credit_note_error} if credit_note_error else {}),
+        },
+        sms_ledger_processed_at=datetime.now(timezone.utc),
+        )
+        db.add(txn)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            txn = (
+                db.query(AccountBillingTransaction)
+                .filter(
+                    (AccountBillingTransaction.stripe_refund_id == refund_id)
+                    | (AccountBillingTransaction.idempotency_key == idem_key)
+                )
+                .first()
+            )
+            if not txn:
+                raise
+            idempotent_reused = True
+            txn_details = dict(txn.details) if isinstance(txn.details, dict) else {}
+            if credit_note_id and not txn.stripe_credit_note_id:
+                txn.stripe_credit_note_id = credit_note_id
+            if credit_note_number and not txn_details.get("stripe_credit_note_number"):
+                txn_details["stripe_credit_note_number"] = credit_note_number
+            if credit_note_pdf and not txn_details.get("credit_note_pdf"):
+                txn_details["credit_note_pdf"] = credit_note_pdf
+            if credit_note_status and not txn_details.get("credit_note_status"):
+                txn_details["credit_note_status"] = credit_note_status
+            if credit_note_error and not txn_details.get("credit_note_error"):
+                txn_details["credit_note_error"] = credit_note_error
+            txn.details = txn_details
+            db.add(txn)
+    ref = f"billing_txn:{txn.id}:refund"
+    ledger_row = db.query(SmsCreditLedger).filter(SmsCreditLedger.billing_transaction_id == txn.id).first()
+    if not ledger_row:
+        ledger_row = SmsCreditLedger(user_id=original.user_id, entry_type="debit", amount=reversal_quantity, reason="billing_transaction_refund_reversal", reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_refund_id": txn.stripe_refund_id, "stripe_credit_note_id": txn.stripe_credit_note_id})
+        db.add(ledger_row)
+        db.flush()
 
-    if matched:
-        total_credits = sum(int(r.amount or 0) for r in matched)
-        amount_refunded = int(getattr(refund, "amount", 0) or 0)
-        amount_captured = int(getattr(getattr(invoice, "charge", None), "amount", 0) or 0)
-        if amount_captured > 0 and amount_refunded < amount_captured:
-            to_reverse = max(1, int((total_credits * amount_refunded) / amount_captured))
-        else:
-            to_reverse = total_credits
-
-        refund_id = str(getattr(refund, "id", "") or "")
-        refund_ref = f"stripe:refund:{refund_id}" if refund_id else f"stripe:refund:pi:{pi_id}:{int(datetime.now(timezone.utc).timestamp())}"
-
-        for credit_row in matched:
-            cdetails = dict(credit_row.details) if isinstance(credit_row.details, dict) else {}
-            cdetails["refunded"] = True
-            cdetails["refunded_at"] = datetime.now(timezone.utc).isoformat()
-            cdetails["refund_reference"] = refund_ref
-            if credit_note is not None:
-                cdetails["credit_note_id"] = str(getattr(credit_note, "id", "") or "")
-            credit_row.details = cdetails
-            db.add(credit_row)
-
-        db.add(SmsCreditLedger(
-            user_id=payload.user_id,
-            entry_type="debit",
-            amount=to_reverse,
-            reason="stripe_refund_reversal",
-            reference_id=refund_ref,
-            details={
-                "source": "admin_refund_api",
-                "payment_intent_id": pi_id,
-                "stripe_refund_id": str(getattr(refund, "id", "") or ""),
-                "stripe_invoice_id": payload.invoice_id,
-                "stripe_credit_note_id": str(getattr(credit_note, "id", "") or "") if credit_note is not None else None,
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-            },
-        ))
+    prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id==original.id, AccountBillingTransaction.transaction_type=="refund", AccountBillingTransaction.status=="succeeded", AccountBillingTransaction.stripe_refund_id.like("re_%")).all()
+    total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
+    original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
+    db.add(original)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        txn = (
+            db.query(AccountBillingTransaction)
+            .filter(
+                (AccountBillingTransaction.stripe_refund_id == refund_id)
+                | (AccountBillingTransaction.idempotency_key == idem_key)
+            )
+            .first()
+        )
+        if not txn:
+            raise
+        idempotent_reused = True
+        ledger_row = db.query(SmsCreditLedger).filter(SmsCreditLedger.billing_transaction_id == txn.id).first()
+        if not ledger_row:
+            ledger_row = SmsCreditLedger(user_id=original.user_id, entry_type="debit", amount=reversal_quantity, reason="billing_transaction_refund_reversal", reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_refund_id": txn.stripe_refund_id, "stripe_credit_note_id": txn.stripe_credit_note_id})
+            db.add(ledger_row)
+        prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id==original.id, AccountBillingTransaction.transaction_type=="refund", AccountBillingTransaction.status=="succeeded", AccountBillingTransaction.stripe_refund_id.like("re_%")).all()
+        total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
+        original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
+        db.add(original)
         db.commit()
 
-    return {
-        "ok": True,
-        "payment_intent_id": pi_id,
-        "refund_id": str(getattr(refund, "id", "") or ""),
-        "credit_note_id": str(getattr(credit_note, "id", "") or "") if credit_note is not None else None,
-    }
+    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": credit_note_pdf or None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status, "idempotent_reused": idempotent_reused}
