@@ -376,6 +376,7 @@ def _handle_checkout_completed(db: Session, event: dict):
         return
     invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
     amount_minor = int(metadata.get("amount_minor") or 0)
+    checkout_session_id = str(getattr(obj, "id", "") or "")
     txn = _record_billing_transaction(db, {
         "user_id": user_id,
         "initiated_by_user_id": user_id,
@@ -388,7 +389,7 @@ def _handle_checkout_completed(db: Session, event: dict):
         "currency": (metadata.get("currency") or "GBP").upper(),
         "quantity": quantity,
         "stripe_customer_id": _stripe_obj_id(getattr(obj, "customer", None)),
-        "stripe_checkout_session_id": str(getattr(obj, "id", "") or ""),
+        "stripe_checkout_session_id": checkout_session_id,
         "stripe_payment_intent_id": payment_intent_id,
         "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
         "stripe_event_id": event["id"],
