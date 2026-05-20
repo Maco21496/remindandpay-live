@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger, AccountBillingTransaction
@@ -739,42 +739,60 @@ def admin_user_invoices(
     db: Session = Depends(get_db),
     owner: User = Depends(require_owner),
 ):
-    import stripe
-
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
-
-    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
-    if not profile or not profile.stripe_customer_id:
-        return {"invoices": []}
-
     limit = max(1, min(int(limit or 30), 100))
-    invoices = stripe.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+    payment_rows = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.user_id == user_id)
+        .filter(AccountBillingTransaction.transaction_type == "payment")
+        .filter(AccountBillingTransaction.product_type == "sms_topup")
+        .filter(AccountBillingTransaction.status.in_(["succeeded", "partially_refunded"]))
+        .filter(AccountBillingTransaction.stripe_payment_intent_id.isnot(None))
+        .order_by(AccountBillingTransaction.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
     rows = []
-    for inv in invoices.auto_paging_iter():
-        inv_id = str(getattr(inv, "id", "") or "")
-        inv_number = str(getattr(inv, "number", "") or "")
-        inv_status = str(getattr(inv, "status", "") or "")
-        inv_pi = str(getattr(getattr(inv, "payment_intent", None), "id", None) or getattr(inv, "payment_intent", "") or "")
+    for tx in payment_rows:
+        total_minor = abs(int(tx.amount_minor or 0))
+        refunded_minor = (
+            db.query(func.coalesce(func.sum(func.abs(AccountBillingTransaction.amount_minor)), 0))
+            .filter(AccountBillingTransaction.parent_transaction_id == tx.id)
+            .filter(AccountBillingTransaction.transaction_type == "refund")
+            .filter(AccountBillingTransaction.status.in_(["succeeded", "pending"]))
+            .scalar()
+            or 0
+        )
+        refundable_minor = max(0, total_minor - int(refunded_minor))
+        if refundable_minor <= 0:
+            continue
+
+        details = dict(tx.details) if isinstance(tx.details, dict) else {}
+        number = details.get("stripe_invoice_number") or tx.stripe_invoice_id or str(tx.id)
         rows.append({
-            "id": inv_id,
-            "number": inv_number,
-            "status": inv_status,
-            "created": getattr(inv, "created", None),
-            "amount_due": getattr(inv, "amount_due", None),
-            "currency": getattr(inv, "currency", None),
-            "payment_intent_id": inv_pi,
-            "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+            "id": tx.id,
+            "billing_transaction_id": tx.id,
+            "number": number,
+            "created": int(tx.created_at.timestamp()) if tx.created_at else None,
+            "status": tx.status,
+            "currency": (tx.currency or "").upper(),
+            "amount_due": total_minor,
+            "amount_minor": tx.amount_minor,
+            "amount_refunded": int(refunded_minor),
+            "refundable_amount_minor": refundable_minor,
+            "product_code": tx.product_code,
+            "quantity": tx.quantity,
+            "stripe_invoice_id": tx.stripe_invoice_id,
+            "stripe_payment_intent_id": tx.stripe_payment_intent_id,
         })
 
-    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return {"invoices": rows[:limit]}
 
 
 class AdminRefundTopupIn(BaseModel):
     user_id: int
-    invoice_id: str
+    billing_transaction_id: int | None = None
+    invoice_id: str | None = None
     amount_pence: int | None = None
     reason: str | None = None
 
@@ -791,31 +809,58 @@ def admin_refund_topup(
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
-    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == payload.user_id).first()
-    if not profile or not profile.stripe_customer_id:
-        raise HTTPException(status_code=404, detail="Billing profile/customer not found")
+    tx_id = payload.billing_transaction_id
+    if tx_id is None and payload.invoice_id is not None:
+        raw = str(payload.invoice_id).strip()
+        if raw.isdigit():
+            tx_id = int(raw)
+    if tx_id is None:
+        raise HTTPException(status_code=400, detail="billing_transaction_id is required")
 
-    invoice = stripe.Invoice.retrieve(payload.invoice_id)
-    inv_customer = str(getattr(getattr(invoice, "customer", None), "id", None) or getattr(invoice, "customer", "") or "").strip()
-    if inv_customer != str(profile.stripe_customer_id or "").strip():
-        raise HTTPException(status_code=400, detail="Invoice does not belong to requested user")
-
-    pi_id = str(getattr(getattr(invoice, "payment_intent", None), "id", None) or getattr(invoice, "payment_intent", "") or "").strip()
-    original = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.transaction_type=="payment", AccountBillingTransaction.stripe_payment_intent_id==pi_id).first()
+    original = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.id == tx_id, AccountBillingTransaction.user_id == payload.user_id)
+        .first()
+    )
     if not original:
         raise HTTPException(status_code=404, detail="Original payment transaction not found")
+    if original.transaction_type != "payment" or original.product_type != "sms_topup":
+        raise HTTPException(status_code=400, detail="Selected transaction is not a refundable sms top-up payment")
+    if original.status not in {"succeeded", "partially_refunded"}:
+        raise HTTPException(status_code=400, detail="Selected transaction is not refundable")
+
+    pi_id = str(original.stripe_payment_intent_id or "").strip()
+    if not pi_id:
+        raise HTTPException(status_code=400, detail="Selected transaction is missing Stripe payment reference")
+
+    already_refunded = (
+        db.query(func.coalesce(func.sum(func.abs(AccountBillingTransaction.amount_minor)), 0))
+        .filter(AccountBillingTransaction.parent_transaction_id == original.id)
+        .filter(AccountBillingTransaction.transaction_type == "refund")
+        .filter(AccountBillingTransaction.status.in_(["succeeded", "pending"]))
+        .scalar()
+        or 0
+    )
+    total_minor = abs(int(original.amount_minor or 0))
+    refundable_minor = max(0, total_minor - int(already_refunded))
+    if refundable_minor <= 0:
+        raise HTTPException(status_code=400, detail="Transaction is already fully refunded")
 
     refund_kwargs = {"payment_intent": pi_id}
     if payload.amount_pence and int(payload.amount_pence) > 0:
-        refund_kwargs["amount"] = int(payload.amount_pence)
+        req_amount = int(payload.amount_pence)
+        if req_amount > refundable_minor:
+            raise HTTPException(status_code=400, detail="Requested refund amount exceeds refundable amount")
+        refund_kwargs["amount"] = req_amount
     refund = stripe.Refund.create(**refund_kwargs)
 
     credit_note = None
     try:
-        credit_note_kwargs = {"invoice": payload.invoice_id, "reason": "requested_by_customer", "memo": (payload.reason or "Admin-approved refund").strip()[:500]}
+        credit_note_kwargs = {"invoice": original.stripe_invoice_id, "reason": "requested_by_customer", "memo": (payload.reason or "Admin-approved refund").strip()[:500]}
         if payload.amount_pence and int(payload.amount_pence) > 0:
             credit_note_kwargs["amount"] = int(payload.amount_pence)
-        credit_note = stripe.CreditNote.create(**credit_note_kwargs)
+        if original.stripe_invoice_id:
+            credit_note = stripe.CreditNote.create(**credit_note_kwargs)
     except Exception:
         credit_note = None
 
@@ -841,7 +886,7 @@ def admin_refund_topup(
         parent_transaction_id=original.id,
         stripe_customer_id=original.stripe_customer_id,
         stripe_payment_intent_id=pi_id,
-        stripe_invoice_id=payload.invoice_id,
+        stripe_invoice_id=original.stripe_invoice_id,
         stripe_refund_id=refund_id,
         stripe_credit_note_id=credit_note_id,
         idempotency_key=f"stripe:refund:{refund_id}",
@@ -861,4 +906,3 @@ def admin_refund_topup(
     db.commit()
 
     return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "billing_transaction_id": txn.id}
-
