@@ -10,7 +10,6 @@ URLS = [
     "/api/statement_reminders/statements/enqueue-due",
     "/api/chasing_reminders/enqueue-due",  
     "/api/sms/billing/enqueue-due",
-    "/api/billing/stripe/topup-reconcile/enqueue-due",
 ]
 
 def tick():

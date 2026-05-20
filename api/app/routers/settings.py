@@ -411,17 +411,6 @@ def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(
         "credit_note_pdf": getattr(cn, "pdf", None),
     }
 
-    details = dict(row.details) if isinstance(row.details, dict) else {}
-    stripe_invoice_number = getattr(inv, "number", None) or details.get("stripe_invoice_number")
-
-    return {
-        "available": bool(getattr(inv, "invoice_pdf", None) or getattr(inv, "hosted_invoice_url", None)),
-        "stripe_invoice_id": row.stripe_invoice_id,
-        "stripe_invoice_number": stripe_invoice_number,
-        "invoice_pdf": getattr(inv, "invoice_pdf", None),
-        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
-    }
-
 
 @router.get("/billing/documents/credit-note/{transaction_id}")
 def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
