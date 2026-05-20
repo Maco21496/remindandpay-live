@@ -11,9 +11,9 @@ from fastapi import Depends, UploadFile, File
 from pydantic import BaseModel, validator
 from zoneinfo import available_timezones
 
-from ..shared import APIRouter
+from ..shared import APIRouter, HTTPException
 from ..database import get_db
-from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger, SmsCreditLedger
+from ..models import AppSettings, AccountBillingProfile, AccountBillingTransaction
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
@@ -244,56 +244,105 @@ def get_billing_settings(db: Session = Depends(get_db), user=Depends(require_use
 
 @router.get("/billing/invoices")
 def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=Depends(require_user)):
-    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user.id).first()
-    if not profile or not profile.stripe_customer_id:
-        return {"invoices": []}
+    limit = max(1, min(int(limit or 20), 100))
+    rows = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.user_id == user.id)
+        .order_by(AccountBillingTransaction.created_at.desc())
+        .limit(limit)
+        .all()
+    )
 
     stripe_client = _get_stripe_client()
-    if not stripe_client.api_key:
-        return {"invoices": []}
+    invoices = []
+    for row in rows:
+        details = dict(row.details) if isinstance(row.details, dict) else {}
+        document_error = None
+        stripe_invoice_number = details.get("stripe_invoice_number")
+        stripe_invoice_status = None
+        stripe_invoice_finalized_at = None
+        hosted_invoice_url = None
+        invoice_pdf = None
+        credit_note_url = None
+        credit_note_pdf = None
 
-    limit = max(1, min(int(limit or 20), 100))
-    invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+        if row.stripe_invoice_id:
+            try:
+                inv = stripe_client.Invoice.retrieve(row.stripe_invoice_id)
+                stripe_invoice_number = getattr(inv, "number", None) or stripe_invoice_number
+                stripe_invoice_status = getattr(inv, "status", None)
+                status_transitions = getattr(inv, "status_transitions", None)
+                stripe_invoice_finalized_at = (
+                    getattr(status_transitions, "finalized_at", None)
+                    if status_transitions is not None
+                    else None
+                )
+                hosted_invoice_url = getattr(inv, "hosted_invoice_url", None)
+                invoice_pdf = getattr(inv, "invoice_pdf", None)
+            except Exception as exc:
+                document_error = f"invoice_retrieve_failed:{exc.__class__.__name__}:{exc}"
 
-    refunded_payment_intents = set()
-    topup_refunded_by_pi: dict[str, bool] = {}
-    for row in (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.user_id == user.id)
-        .filter(SmsCreditLedger.reason == "stripe_refund_reversal")
-        .all()
-    ):
-        details = row.details if isinstance(row.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "").strip()
-        if pi:
-            refunded_payment_intents.add(pi)
+        if row.stripe_credit_note_id:
+            try:
+                cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+                credit_note_pdf = getattr(cn, "pdf", None)
+                credit_note_url = getattr(cn, "pdf", None) or getattr(cn, "credit_note_pdf", None)
+            except Exception as exc:
+                if not document_error:
+                    document_error = f"credit_note_retrieve_failed:{exc.__class__.__name__}:{exc}"
+
+        invoices.append({
+            "id": row.id,
+            "number": stripe_invoice_number or row.stripe_invoice_id,
+            "status": row.status,
+            "currency": (row.currency or "").upper(),
+            "amount_due": row.amount_minor,
+            "amount_paid": row.amount_minor,
+            "created": int(row.created_at.timestamp()) if row.created_at else None,
+            "hosted_invoice_url": hosted_invoice_url,
+            "invoice_pdf": invoice_pdf,
+            "kind": row.product_type,
+            "transaction_type": row.transaction_type,
+            "product_code": row.product_code,
+            "parent_transaction_id": row.parent_transaction_id,
+            "stripe_invoice_id": row.stripe_invoice_id,
+            "stripe_invoice_number": stripe_invoice_number,
+            "stripe_invoice_status": stripe_invoice_status,
+            "stripe_invoice_finalized_at": stripe_invoice_finalized_at,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "credit_note_url": credit_note_url,
+            "credit_note_pdf": credit_note_pdf,
+            "document_error": document_error,
+        })
+
+    return {"billing_invoice_route_version": "local_txn_doc_hydration_v3", "invoices": invoices}
 
 
-    for row in (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.user_id == user.id)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .all()
-    ):
-        details = row.details if isinstance(row.details, dict) else {}
-        pi = str(details.get("payment_intent_id") or "").strip()
-        if pi:
-            topup_refunded_by_pi[pi] = bool(details.get("refunded"))
 
-    rows = []
 
-    for inv in invoices.auto_paging_iter():
-        metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
-        inv_sub = getattr(inv, "subscription", None)
-        kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
-        row = _stripe_invoice_to_row(inv, kind=kind)
-        inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        if inv_pi and (topup_refunded_by_pi.get(inv_pi) or inv_pi in refunded_payment_intents):
-            row["status"] = "refunded"
-        rows.append(row)
+@router.get("/billing/documents/invoice/{transaction_id}")
+def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.id == transaction_id, AccountBillingTransaction.user_id == user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not row.stripe_invoice_id:
+        return {"available": False, "message": "Invoice document is unavailable for this transaction."}
+    stripe_client = _get_stripe_client()
+    inv = stripe_client.Invoice.retrieve(row.stripe_invoice_id)
+    return {"available": bool(getattr(inv, "invoice_pdf", None)), "invoice_pdf": getattr(inv, "invoice_pdf", None), "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None)}
 
-    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
-    return {"invoices": rows[:limit]}
+
+@router.get("/billing/documents/credit-note/{transaction_id}")
+def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.id == transaction_id, AccountBillingTransaction.user_id == user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not row.stripe_credit_note_id:
+        return {"available": False, "message": "Credit note is unavailable for this transaction."}
+    stripe_client = _get_stripe_client()
+    cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    return {"available": bool(getattr(cn, "pdf", None)), "credit_note_pdf": getattr(cn, "pdf", None)}
+
 
 
 @router.post("/restore_defaults")
