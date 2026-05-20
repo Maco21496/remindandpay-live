@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger, AccountBillingTransaction
@@ -906,16 +907,19 @@ def admin_refund_topup(
     credit_note_number = str(getattr(credit_note, "number", "") or "") if credit_note is not None else None
     credit_note_pdf = str(getattr(credit_note, "pdf", "") or "") if credit_note is not None else None
     credit_note_status = str(getattr(credit_note, "status", "") or "") if credit_note is not None else None
+    idem_key = f"stripe:refund:{refund_id}"
     existing_refund_txn = (
         db.query(AccountBillingTransaction)
         .filter(
             (AccountBillingTransaction.stripe_refund_id == refund_id)
-            | (AccountBillingTransaction.idempotency_key == f"stripe:refund:{refund_id}")
+            | (AccountBillingTransaction.idempotency_key == idem_key)
         )
         .first()
     )
+    idempotent_reused = False
     if existing_refund_txn:
         txn = existing_refund_txn
+        idempotent_reused = True
         if credit_note_id and not txn.stripe_credit_note_id:
             txn.stripe_credit_note_id = credit_note_id
         txn_details = dict(txn.details) if isinstance(txn.details, dict) else {}
@@ -947,7 +951,7 @@ def admin_refund_topup(
         stripe_invoice_id=original.stripe_invoice_id,
         stripe_refund_id=refund_id,
         stripe_credit_note_id=credit_note_id,
-        idempotency_key=f"stripe:refund:{refund_id}",
+        idempotency_key=idem_key,
         details={
             "source": "admin_refund_api",
             **({"stripe_credit_note_number": credit_note_number} if credit_note_number else {}),
@@ -958,7 +962,34 @@ def admin_refund_topup(
         sms_ledger_processed_at=datetime.now(timezone.utc),
         )
         db.add(txn)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            txn = (
+                db.query(AccountBillingTransaction)
+                .filter(
+                    (AccountBillingTransaction.stripe_refund_id == refund_id)
+                    | (AccountBillingTransaction.idempotency_key == idem_key)
+                )
+                .first()
+            )
+            if not txn:
+                raise
+            idempotent_reused = True
+            txn_details = dict(txn.details) if isinstance(txn.details, dict) else {}
+            if credit_note_id and not txn.stripe_credit_note_id:
+                txn.stripe_credit_note_id = credit_note_id
+            if credit_note_number and not txn_details.get("stripe_credit_note_number"):
+                txn_details["stripe_credit_note_number"] = credit_note_number
+            if credit_note_pdf and not txn_details.get("credit_note_pdf"):
+                txn_details["credit_note_pdf"] = credit_note_pdf
+            if credit_note_status and not txn_details.get("credit_note_status"):
+                txn_details["credit_note_status"] = credit_note_status
+            if credit_note_error and not txn_details.get("credit_note_error"):
+                txn_details["credit_note_error"] = credit_note_error
+            txn.details = txn_details
+            db.add(txn)
     ref = f"billing_txn:{txn.id}:refund"
     ledger_row = db.query(SmsCreditLedger).filter(SmsCreditLedger.billing_transaction_id == txn.id).first()
     if not ledger_row:
@@ -970,6 +1001,29 @@ def admin_refund_topup(
     total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
     original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
     db.add(original)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        txn = (
+            db.query(AccountBillingTransaction)
+            .filter(
+                (AccountBillingTransaction.stripe_refund_id == refund_id)
+                | (AccountBillingTransaction.idempotency_key == idem_key)
+            )
+            .first()
+        )
+        if not txn:
+            raise
+        idempotent_reused = True
+        ledger_row = db.query(SmsCreditLedger).filter(SmsCreditLedger.billing_transaction_id == txn.id).first()
+        if not ledger_row:
+            ledger_row = SmsCreditLedger(user_id=original.user_id, entry_type="debit", amount=reversal_quantity, reason="billing_transaction_refund_reversal", reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_refund_id": txn.stripe_refund_id, "stripe_credit_note_id": txn.stripe_credit_note_id})
+            db.add(ledger_row)
+        prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id==original.id, AccountBillingTransaction.transaction_type=="refund", AccountBillingTransaction.status=="succeeded", AccountBillingTransaction.stripe_refund_id.like("re_%")).all()
+        total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
+        original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
+        db.add(original)
+        db.commit()
 
-    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": credit_note_pdf or None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status}
+    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": credit_note_pdf or None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status, "idempotent_reused": idempotent_reused}
