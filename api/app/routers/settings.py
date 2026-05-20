@@ -253,6 +253,38 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         .all()
     )
 
+    invoices = []
+    for row in rows:
+        invoices.append({
+            "id": row.id,
+            "number": row.stripe_invoice_id,
+            "status": row.status,
+            "currency": (row.currency or "").upper(),
+            "amount_due": row.amount_minor,
+            "amount_paid": row.amount_minor,
+            "created": int(row.created_at.timestamp()) if row.created_at else None,
+            "hosted_invoice_url": None,
+            "invoice_pdf": None,
+            "kind": row.product_type,
+            "transaction_type": row.transaction_type,
+            "product_code": row.product_code,
+            "parent_transaction_id": row.parent_transaction_id,
+            "stripe_invoice_id": row.stripe_invoice_id,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+        })
+
+    return {"invoices": invoices}
+
+
+
+
+@router.get("/billing/documents/invoice/{transaction_id}")
+def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.id == transaction_id, AccountBillingTransaction.user_id == user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not row.stripe_invoice_id:
+        return {"available": False, "message": "Invoice document is unavailable for this transaction."}
     stripe_client = _get_stripe_client()
     invoices = []
 
