@@ -423,7 +423,15 @@ def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_
         return {"available": False, "message": "Invoice document is unavailable for this transaction."}
     stripe_client = _get_stripe_client()
     inv = stripe_client.Invoice.retrieve(row.stripe_invoice_id)
-    return {"available": bool(getattr(inv, "invoice_pdf", None)), "invoice_pdf": getattr(inv, "invoice_pdf", None), "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None)}
+    details = dict(row.details) if isinstance(row.details, dict) else {}
+    stripe_invoice_number = getattr(inv, "number", None) or details.get("stripe_invoice_number")
+    return {
+        "available": bool(getattr(inv, "invoice_pdf", None) or getattr(inv, "hosted_invoice_url", None)),
+        "stripe_invoice_id": row.stripe_invoice_id,
+        "stripe_invoice_number": stripe_invoice_number,
+        "invoice_pdf": getattr(inv, "invoice_pdf", None),
+        "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+    }
 
 
 @router.get("/billing/documents/credit-note/{transaction_id}")
