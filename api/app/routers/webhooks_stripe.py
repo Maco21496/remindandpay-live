@@ -192,10 +192,6 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
 
     for row in rows:
         details = dict(row.details) if isinstance(row.details, dict) else {}
-        if details.get("stripe_invoice_id"):
-            skipped_has_invoice += 1
-            continue
-
         status = str(details.get("invoice_reconcile_status") or "pending")
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or _TOPUP_RETRY_MAX_ATTEMPTS)
@@ -218,13 +214,9 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
 
         scanned += 1
         payment_intent_id = str(details.get("payment_intent_id") or "").strip()
-        found = _resolve_topup_invoice_details(stripe_client, payment_intent_id)
-        if debug_enabled:
-            logger.warning("[billing_reconcile] pi=%s found_invoice_id=%s found_invoice_number=%s status=%s retry_count=%s next_retry_at=%s", payment_intent_id, found.get("stripe_invoice_id"), found.get("stripe_invoice_number"), status, retry_count, next_retry_raw)
-
-        if found.get("stripe_invoice_id"):
-            details.update(found)
-            details["invoice_reconcile_status"] = "resolved"
+        if payment_intent_id:
+            details["payment_verified"] = True
+            details["invoice_reconcile_status"] = "verified"
             details["next_retry_at"] = None
             resolved += 1
         else:
@@ -310,6 +302,14 @@ def _handle_charge_refunded(db: Session, event: dict):
         to_reverse = total_credits
 
     user_id = matched[0].user_id
+    for credit_row in matched:
+        cdetails = dict(credit_row.details) if isinstance(credit_row.details, dict) else {}
+        cdetails["refunded"] = True
+        cdetails["refunded_at"] = datetime.now(timezone.utc).isoformat()
+        cdetails["refund_reference"] = refund_ref
+        credit_row.details = cdetails
+        db.add(credit_row)
+
     db.add(
         SmsCreditLedger(
             user_id=user_id,

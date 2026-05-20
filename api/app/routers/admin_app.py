@@ -518,8 +518,8 @@ def admin_billing_topup_anomalies(
         details = dict(row.details) if isinstance(row.details, dict) else {}
         status = str(details.get("invoice_reconcile_status") or "pending")
         pi = str(details.get("payment_intent_id") or "").strip()
-        invoice_link = str(details.get("stripe_invoice_pdf") or details.get("stripe_invoice_url") or "").strip()
-        if pi and (invoice_link or details.get("payment_verified") is True):
+        # PI is the source of truth: only rows missing PI are anomalies.
+        if pi:
             continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
@@ -676,8 +676,8 @@ def admin_reconcile_topup_anomalies(
         details = dict(row.details) if isinstance(row.details, dict) else {}
         status = str(details.get("invoice_reconcile_status") or "pending")
         pi = str(details.get("payment_intent_id") or "").strip()
-        invoice_link = str(details.get("stripe_invoice_pdf") or details.get("stripe_invoice_url") or "").strip()
-        if pi and (invoice_link or details.get("payment_verified") is True):
+        # PI is the source of truth: only rows missing PI are anomalies.
+        if pi:
             continue
         retry_count = int(details.get("invoice_retry_count") or 0)
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
@@ -687,37 +687,16 @@ def admin_reconcile_topup_anomalies(
         max_attempts = int(details.get("invoice_retry_max_attempts") or 5)
         payment_intent_id = str(details.get("payment_intent_id") or "").strip()
 
-        found = _resolve_topup_invoice_details_admin(stripe, payment_intent_id, include_debug=debug_enabled)
         if debug_enabled and len(debug_rows) < 50:
             debug_rows.append({
                 "ledger_id": row.id,
                 "payment_intent_id": payment_intent_id,
-                "found_invoice_id": found.get("stripe_invoice_id"),
-                "found_invoice_number": found.get("stripe_invoice_number"),
+                "found_invoice_id": None,
+                "found_invoice_number": None,
                 "prev_status": status,
                 "prev_retry_count": retry_count,
-                "resolver_debug": found.get("debug") if isinstance(found, dict) else None,
+                "resolver_debug": {"note": "missing_payment_intent_id"},
             })
-        if found.get("stripe_invoice_id"):
-            details.update(found)
-            details["invoice_reconcile_status"] = "resolved"
-            details["next_retry_at"] = None
-            resolved += 1
-            if apply_changes:
-                row.details = details
-                db.add(row)
-                updated += 1
-            continue
-
-        if found.get("invoice_reconcile_status") == "verified_no_invoice":
-            details.update(found)
-            details["invoice_reconcile_status"] = "verified_no_invoice"
-            details["next_retry_at"] = None
-            if apply_changes:
-                row.details = details
-                db.add(row)
-                updated += 1
-            continue
 
         retry_count += 1
         details["invoice_retry_count"] = retry_count

@@ -256,7 +256,7 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     invoices = stripe_client.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
 
     refunded_payment_intents = set()
-    refunded_invoice_ids = set()
+    topup_refunded_by_pi: dict[str, bool] = {}
     for row in (
         db.query(SmsCreditLedger)
         .filter(SmsCreditLedger.user_id == user.id)
@@ -265,57 +265,31 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
     ):
         details = row.details if isinstance(row.details, dict) else {}
         pi = str(details.get("payment_intent_id") or "").strip()
-        inv_id = str(details.get("stripe_invoice_id") or "").strip()
         if pi:
             refunded_payment_intents.add(pi)
-        if inv_id:
-            refunded_invoice_ids.add(inv_id)
+
+
+    for row in (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == user.id)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    ):
+        details = row.details if isinstance(row.details, dict) else {}
+        pi = str(details.get("payment_intent_id") or "").strip()
+        if pi:
+            topup_refunded_by_pi[pi] = bool(details.get("refunded"))
 
     rows = []
 
-    pi_refund_cache: dict[str, bool] = {}
-
-    def _pi_is_refunded(pi_id: str) -> bool:
-        pi_id = (pi_id or "").strip()
-        if not pi_id:
-            return False
-        if pi_id in pi_refund_cache:
-            return pi_refund_cache[pi_id]
-        try:
-            pi_obj = stripe_client.PaymentIntent.retrieve(pi_id)
-        except Exception:
-            pi_refund_cache[pi_id] = False
-            return False
-
-        # Prefer PaymentIntent-level amount_refunded when available.
-        amount_refunded = int(getattr(pi_obj, "amount_refunded", 0) or 0)
-        if amount_refunded > 0:
-            pi_refund_cache[pi_id] = True
-            return True
-
-        # Fallback: inspect latest charge refund amount.
-        latest_charge = getattr(pi_obj, "latest_charge", None)
-        charge_id = str(getattr(latest_charge, "id", None) or latest_charge or "").strip()
-        if not charge_id:
-            pi_refund_cache[pi_id] = False
-            return False
-        try:
-            ch = stripe_client.Charge.retrieve(charge_id)
-            refunded = int(getattr(ch, "amount_refunded", 0) or 0) > 0
-        except Exception:
-            refunded = False
-        pi_refund_cache[pi_id] = refunded
-        return refunded
     for inv in invoices.auto_paging_iter():
         metadata = _stripe_metadata_dict(getattr(inv, "metadata", None))
         inv_sub = getattr(inv, "subscription", None)
         kind = "membership" if inv_sub else ("topup" if (metadata.get("kind") == "sms_topup") else "other")
         row = _stripe_invoice_to_row(inv, kind=kind)
         inv_pi = str(getattr(inv, "payment_intent", "") or "").strip()
-        inv_id = str(getattr(inv, "id", "") or "").strip()
-        if kind == "topup":
-            if (inv_pi and inv_pi in refunded_payment_intents) or (inv_id and inv_id in refunded_invoice_ids) or _pi_is_refunded(inv_pi):
-                row["status"] = "refunded"
+        if inv_pi and (topup_refunded_by_pi.get(inv_pi) or inv_pi in refunded_payment_intents):
+            row["status"] = "refunded"
         rows.append(row)
 
     rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
