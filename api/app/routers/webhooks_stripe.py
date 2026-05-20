@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import Request
 
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger, AccountBillingProfile
+from ..models import AccountSmsSettings, SmsCreditLedger, AccountBillingProfile, AccountBillingTransaction
 from ..shared import APIRouter, BaseModel, Depends, HTTPException, Session
 from .auth import require_user
 
@@ -52,9 +52,17 @@ def create_checkout_session(
 
     stripe_client = _get_stripe_client()
 
+    credits = int(package["credits"])
+    product_code = f"sms_topup_{credits}"
+
     topup_metadata = {
+        "account_id": str(user.id),
         "user_id": str(user.id),
-        "credits": str(package["credits"]),
+        "product_type": "sms_topup",
+        "product_code": product_code,
+        "quantity": str(credits),
+        "amount_minor": str(int(package_key) * 100),
+        "currency": "GBP",
         "kind": "sms_topup",
         "package_key": package_key,
     }
@@ -259,6 +267,43 @@ def enqueue_due_topup_reconcile(db: Session = Depends(get_db)):
     }
 
 
+def _record_billing_transaction(db: Session, payload: dict) -> AccountBillingTransaction | None:
+    idem_key = str(payload.get("idempotency_key") or "").strip()
+    if not idem_key:
+        return None
+    existing = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.idempotency_key == idem_key).first()
+    if existing:
+        return existing
+    stripe_event_id = str(payload.get("stripe_event_id") or "").strip()
+    if stripe_event_id:
+        existing_evt = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.stripe_event_id == stripe_event_id).first()
+        if existing_evt:
+            return existing_evt
+    txn = AccountBillingTransaction(**payload)
+    db.add(txn)
+    db.flush()
+    return txn
+
+
+def _apply_sms_ledger_for_transaction(db: Session, txn: AccountBillingTransaction):
+    if txn.sms_ledger_processed_at is not None or txn.status != "succeeded":
+        return
+    if txn.product_type != "sms_topup":
+        txn.sms_ledger_processed_at = datetime.now(timezone.utc)
+        db.add(txn)
+        return
+    entry_type = "credit" if txn.transaction_type == "payment" else "debit"
+    reason = "billing_transaction_topup" if entry_type == "credit" else "billing_transaction_refund_reversal"
+    ref = f"billing_txn:{txn.id}:{txn.transaction_type}"
+    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == ref).first():
+        txn.sms_ledger_processed_at = datetime.now(timezone.utc)
+        db.add(txn)
+        return
+    db.add(SmsCreditLedger(user_id=txn.user_id, entry_type=entry_type, amount=abs(int(txn.quantity or 0)), reason=reason, reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_payment_intent_id": txn.stripe_payment_intent_id, "stripe_refund_id": txn.stripe_refund_id}))
+    txn.sms_ledger_processed_at = datetime.now(timezone.utc)
+    db.add(txn)
+
+
 def _handle_charge_refunded(db: Session, event: dict):
     obj = event["data"]["object"]
     payment_intent_id = _stripe_obj_id(getattr(obj, "payment_intent", None))
@@ -266,127 +311,94 @@ def _handle_charge_refunded(db: Session, event: dict):
     if not payment_intent_id or not refund_id:
         return
 
-    # Idempotency: one compensating debit per refund event.
-    refund_ref = f"stripe:refund:{refund_id}"
-    if db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == refund_ref).first():
-        return
-
-    credits = (
-        db.query(SmsCreditLedger)
-        .filter(SmsCreditLedger.reason == "stripe_topup")
-        .all()
+    original = (
+        db.query(AccountBillingTransaction)
+        .filter(AccountBillingTransaction.transaction_type == "payment")
+        .filter(AccountBillingTransaction.stripe_payment_intent_id == payment_intent_id)
+        .first()
     )
-    matched = []
-    for row in credits:
-        details = dict(row.details) if isinstance(row.details, dict) else {}
-        if str(details.get("payment_intent_id") or "").strip() == payment_intent_id and row.entry_type == "credit":
-            matched.append(row)
-    if not matched:
-        return
-
-    total_credits = sum(int(r.amount or 0) for r in matched)
-    if total_credits <= 0:
+    if not original:
         return
 
     amount_refunded = int(getattr(obj, "amount_refunded", 0) or 0)
     amount_captured = int(getattr(obj, "amount_captured", 0) or 0)
-    if amount_refunded <= 0:
-        return
+    quantity = original.quantity or 0
+    if amount_refunded > 0 and amount_captured > 0 and amount_refunded < amount_captured and quantity:
+        quantity = max(1, int((quantity * amount_refunded) / amount_captured))
 
-    invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
-
-    # Full refund -> full credit reversal; partial refund -> proportional reversal.
-    if amount_captured > 0 and amount_refunded < amount_captured:
-        to_reverse = max(1, int((total_credits * amount_refunded) / amount_captured))
-    else:
-        to_reverse = total_credits
-
-    user_id = matched[0].user_id
-    for credit_row in matched:
-        cdetails = dict(credit_row.details) if isinstance(credit_row.details, dict) else {}
-        cdetails["refunded"] = True
-        cdetails["refunded_at"] = datetime.now(timezone.utc).isoformat()
-        cdetails["refund_reference"] = refund_ref
-        credit_row.details = cdetails
-        db.add(credit_row)
-
-    db.add(
-        SmsCreditLedger(
-            user_id=user_id,
-            entry_type="debit",
-            amount=to_reverse,
-            reason="stripe_refund_reversal",
-            reference_id=refund_ref,
-            details={
-                "stripe_event_id": event["id"],
-                "payment_intent_id": payment_intent_id,
-                "stripe_charge_id": _stripe_obj_id(getattr(obj, "charge", None)),
-                "stripe_refund_id": refund_id,
-                "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
-                "stripe_invoice_number": invoice_details.get("stripe_invoice_number"),
-                "amount_refunded": amount_refunded,
-                "amount_captured": amount_captured,
-                "source": "stripe_webhook_refund",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-    )
+    checkout_session_id = str(getattr(obj, "id", "") or "")
+    txn = _record_billing_transaction(db, {
+        "user_id": original.user_id,
+        "initiated_by_user_id": None,
+        "transaction_type": "refund",
+        "product_type": original.product_type,
+        "product_code": original.product_code,
+        "description": f"Refund for transaction #{original.id}",
+        "status": "succeeded",
+        "amount_minor": -abs(amount_refunded),
+        "currency": original.currency,
+        "quantity": quantity,
+        "parent_transaction_id": original.id,
+        "stripe_customer_id": original.stripe_customer_id,
+        "stripe_payment_intent_id": payment_intent_id,
+        "stripe_charge_id": _stripe_obj_id(getattr(obj, "charge", None)),
+        "stripe_refund_id": refund_id,
+        "stripe_event_id": event["id"],
+        "idempotency_key": f"stripe:refund:{refund_id}",
+        "details": {"stripe_source": "charge.refunded"},
+    })
+    _apply_sms_ledger_for_transaction(db, txn)
+    original.status = "refunded" if quantity >= (original.quantity or 0) else "partially_refunded"
+    db.add(original)
     db.commit()
+
 
 
 def _handle_checkout_completed(db: Session, event: dict):
     obj = event["data"]["object"]
     if getattr(obj, "mode", None) != "payment":
         return
-
     metadata = _metadata_to_dict(getattr(obj, "metadata", None))
     if metadata.get("kind") != "sms_topup":
         return
-
-    user_id_str = metadata.get("user_id")
-    if not user_id_str:
-        return
-
     try:
-        user_id = int(user_id_str)
+        user_id = int(metadata.get("user_id"))
     except (TypeError, ValueError):
         return
-
-    settings = db.query(AccountSmsSettings).filter(AccountSmsSettings.user_id == user_id).first()
-    if not settings:
-        return
-
     payment_intent_id = str(getattr(obj, "payment_intent", "") or "").strip()
-    checkout_session_id = str(obj["id"])
-    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id, checkout_session_id=checkout_session_id)
-    if _topup_already_recorded(db, payment_intent_id=payment_intent_id, checkout_session_id=checkout_session_id):
+    if not payment_intent_id:
         return
-
-    amount = _credits_for_checkout_session(metadata)
-    if amount <= 0:
+    existing = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.stripe_payment_intent_id == payment_intent_id, AccountBillingTransaction.transaction_type == "payment").first()
+    if existing:
         return
-
+    quantity = int(metadata.get("quantity") or metadata.get("credits") or 0)
+    if quantity <= 0:
+        return
     invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
-
-    db.add(
-        SmsCreditLedger(
-            user_id=user_id,
-            entry_type="credit",
-            amount=amount,
-            reason="stripe_topup",
-            reference_id=reference_id,
-            details={
-                "stripe_event_id": event["id"],
-                "stripe_session_id": checkout_session_id,
-                "payment_intent_id": payment_intent_id or None,
-                "source": "stripe_webhook",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "package_key": metadata.get("package_key"),
-                **invoice_details,
-            },
-        )
-    )
+    amount_minor = int(metadata.get("amount_minor") or 0)
+    checkout_session_id = str(getattr(obj, "id", "") or "")
+    txn = _record_billing_transaction(db, {
+        "user_id": user_id,
+        "initiated_by_user_id": user_id,
+        "transaction_type": "payment",
+        "product_type": metadata.get("product_type") or "sms_topup",
+        "product_code": metadata.get("product_code") or f"sms_topup_{quantity}",
+        "description": f"SMS top-up ({quantity} credits)",
+        "status": "succeeded",
+        "amount_minor": amount_minor,
+        "currency": (metadata.get("currency") or "GBP").upper(),
+        "quantity": quantity,
+        "stripe_customer_id": _stripe_obj_id(getattr(obj, "customer", None)),
+        "stripe_checkout_session_id": checkout_session_id,
+        "stripe_payment_intent_id": payment_intent_id,
+        "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
+        "stripe_event_id": event["id"],
+        "idempotency_key": f"stripe:checkout_session:{checkout_session_id}",
+        "details": {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")},
+    })
+    _apply_sms_ledger_for_transaction(db, txn)
     db.commit()
+
 
 
 def _handle_payment_intent_succeeded(db: Session, event: dict):
@@ -394,48 +406,38 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
     metadata = _metadata_to_dict(getattr(obj, "metadata", None))
     if metadata.get("kind") != "sms_topup":
         return
-
-    user_id_str = metadata.get("user_id")
-    if not user_id_str:
-        return
     try:
-        user_id = int(user_id_str)
+        user_id = int(metadata.get("user_id"))
     except (TypeError, ValueError):
         return
-
-    settings = db.query(AccountSmsSettings).filter(AccountSmsSettings.user_id == user_id).first()
-    if not settings:
-        return
-
     payment_intent_id = str(obj["id"])
-    reference_id = _sms_topup_reference_id(payment_intent_id=payment_intent_id)
-    if _topup_already_recorded(db, payment_intent_id=payment_intent_id):
+    if db.query(AccountBillingTransaction).filter(AccountBillingTransaction.stripe_payment_intent_id == payment_intent_id, AccountBillingTransaction.transaction_type == "payment").first():
         return
-
     amount = _credits_for_checkout_session(metadata)
     if amount <= 0:
         return
-
     invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
-
-    db.add(
-        SmsCreditLedger(
-            user_id=user_id,
-            entry_type="credit",
-            amount=amount,
-            reason="stripe_topup",
-            reference_id=reference_id,
-            details={
-                "stripe_event_id": event["id"],
-                "payment_intent_id": obj["id"],
-                "source": "stripe_webhook_payment_intent",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "package_key": metadata.get("package_key"),
-                **invoice_details,
-            },
-        )
-    )
+    txn = _record_billing_transaction(db, {
+        "user_id": user_id,
+        "initiated_by_user_id": user_id,
+        "transaction_type": "payment",
+        "product_type": "sms_topup",
+        "product_code": f"sms_topup_{amount}",
+        "description": f"SMS top-up ({amount} credits)",
+        "status": "succeeded",
+        "amount_minor": int(getattr(obj, "amount_received", 0) or 0),
+        "currency": str(getattr(obj, "currency", "gbp") or "gbp").upper(),
+        "quantity": amount,
+        "stripe_customer_id": _stripe_obj_id(getattr(obj, "customer", None)),
+        "stripe_payment_intent_id": payment_intent_id,
+        "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
+        "stripe_event_id": event["id"],
+        "idempotency_key": f"stripe:payment_intent:{payment_intent_id}:sms_topup",
+        "details": {"stripe_source": "payment_intent.succeeded", "package_key": metadata.get("package_key")},
+    })
+    _apply_sms_ledger_for_transaction(db, txn)
     db.commit()
+
 
 
 def _stripe_obj_id(value) -> str:
