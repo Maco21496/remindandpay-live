@@ -102,7 +102,7 @@ class AccountBillingTransaction(Base):
     stripe_credit_note_id = Column(String(128), nullable=True)
     stripe_event_id = Column(String(128), nullable=True)
     idempotency_key = Column(String(160), nullable=False)
-    metadata = Column(JSON, nullable=True)
+    details = Column("metadata", JSON, nullable=True)
     sms_ledger_processed_at = Column(DateTime, nullable=True)
     billing_profile_processed_at = Column(DateTime, nullable=True)
     reconciled_at = Column(DateTime, nullable=True)

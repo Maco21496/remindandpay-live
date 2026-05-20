@@ -341,7 +341,7 @@ def _handle_charge_refunded(db: Session, event: dict):
         "stripe_refund_id": refund_id,
         "stripe_event_id": event["id"],
         "idempotency_key": f"stripe:refund:{refund_id}",
-        "metadata": {"stripe_source": "charge.refunded"},
+        "details": {"stripe_source": "charge.refunded"},
     })
     _apply_sms_ledger_for_transaction(db, txn)
     original.status = "refunded" if quantity >= (original.quantity or 0) else "partially_refunded"
@@ -389,7 +389,7 @@ def _handle_checkout_completed(db: Session, event: dict):
         "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
         "stripe_event_id": event["id"],
         "idempotency_key": f"stripe:checkout_session:{str(getattr(obj, "id", "") or "")}",
-        "metadata": {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")},
+        "details": {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")},
     })
     _apply_sms_ledger_for_transaction(db, txn)
     db.commit()
@@ -428,7 +428,7 @@ def _handle_payment_intent_succeeded(db: Session, event: dict):
         "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
         "stripe_event_id": event["id"],
         "idempotency_key": f"stripe:payment_intent:{payment_intent_id}:sms_topup",
-        "metadata": {"stripe_source": "payment_intent.succeeded", "package_key": metadata.get("package_key")},
+        "details": {"stripe_source": "payment_intent.succeeded", "package_key": metadata.get("package_key")},
     })
     _apply_sms_ledger_for_transaction(db, txn)
     db.commit()
