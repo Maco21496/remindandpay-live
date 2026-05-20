@@ -230,9 +230,7 @@
                     </form>
                   {% endif %}
 
-                  {% if (u.email or "").strip().lower() != "admin@remindandpay.com" %}
-                    <button class="btn" type="button" onclick="adminRefundTopup({{ u.id }})">Refund top-up</button>
-                  {% endif %}
+                  <button class="btn" type="button" onclick="adminRefundTopup({{ u.id }})">Refund top-up</button>
                 </div>
               </td>
             </tr>
