@@ -356,18 +356,6 @@ def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_
         "invoices": invoices,
     }
 
-@router.get("/billing/documents/credit-note/{transaction_id}")
-def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
-    row = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.id == transaction_id, AccountBillingTransaction.user_id == user.id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    if not row.stripe_credit_note_id:
-        return {"available": False, "message": "Credit note is unavailable for this transaction."}
-    stripe_client = _get_stripe_client()
-    cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
-    return {"available": bool(getattr(cn, "pdf", None)), "credit_note_pdf": getattr(cn, "pdf", None)}
-
-
 
 @router.get("/billing/documents/invoice/{transaction_id}")
 def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
@@ -448,7 +436,6 @@ def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(
         "stripe_credit_note_id": row.stripe_credit_note_id,
         "credit_note_pdf": getattr(cn, "pdf", None),
     }
-
 
 
 @router.post("/restore_defaults")
