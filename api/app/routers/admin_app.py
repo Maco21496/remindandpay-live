@@ -13,7 +13,7 @@ from ..database import get_db
 from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger
 from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
-from ..shared import templates
+from ..shared import templates, BaseModel
 from .auth import require_owner
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -728,4 +728,116 @@ def admin_reconcile_topup_anomalies(
         "anomalies": anomalies,
         "updated": updated,
         "debug": debug_rows if debug_enabled else [],
+    }
+
+
+class AdminRefundTopupIn(BaseModel):
+    user_id: int
+    invoice_id: str
+    amount_pence: int | None = None
+    reason: str | None = None
+
+
+@router.post("/billing/refund-topup")
+def admin_refund_topup(
+    payload: AdminRefundTopupIn,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    import stripe
+
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
+
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == payload.user_id).first()
+    if not profile or not profile.stripe_customer_id:
+        raise HTTPException(status_code=404, detail="Billing profile/customer not found")
+
+    invoice = stripe.Invoice.retrieve(payload.invoice_id)
+    inv_customer = str(getattr(getattr(invoice, "customer", None), "id", None) or getattr(invoice, "customer", "") or "").strip()
+    if inv_customer != str(profile.stripe_customer_id or "").strip():
+        raise HTTPException(status_code=400, detail="Invoice does not belong to requested user")
+
+    pi_id = str(getattr(getattr(invoice, "payment_intent", None), "id", None) or getattr(invoice, "payment_intent", "") or "").strip()
+    if not pi_id:
+        raise HTTPException(status_code=400, detail="Invoice has no payment_intent")
+
+    refund_kwargs = {"payment_intent": pi_id}
+    if payload.amount_pence and int(payload.amount_pence) > 0:
+        refund_kwargs["amount"] = int(payload.amount_pence)
+    refund = stripe.Refund.create(**refund_kwargs)
+
+    # Create credit note tied to invoice for accounting visibility.
+    credit_note_kwargs = {
+        "invoice": payload.invoice_id,
+        "reason": "requested_by_customer",
+        "memo": (payload.reason or "Admin-approved refund").strip()[:500],
+    }
+    if payload.amount_pence and int(payload.amount_pence) > 0:
+        credit_note_kwargs["amount"] = int(payload.amount_pence)
+    credit_note = None
+    try:
+        credit_note = stripe.CreditNote.create(**credit_note_kwargs)
+    except Exception:
+        # Keep refund successful even if credit note creation is unavailable for this invoice shape.
+        credit_note = None
+
+    # Local ledger update mirrors webhook behavior immediately.
+    credits = (
+        db.query(SmsCreditLedger)
+        .filter(SmsCreditLedger.user_id == payload.user_id)
+        .filter(SmsCreditLedger.reason == "stripe_topup")
+        .all()
+    )
+    matched = []
+    for row in credits:
+        details = dict(row.details) if isinstance(row.details, dict) else {}
+        if str(details.get("payment_intent_id") or "").strip() == pi_id and row.entry_type == "credit":
+            matched.append(row)
+
+    if matched:
+        total_credits = sum(int(r.amount or 0) for r in matched)
+        amount_refunded = int(getattr(refund, "amount", 0) or 0)
+        amount_captured = int(getattr(getattr(invoice, "charge", None), "amount", 0) or 0)
+        if amount_captured > 0 and amount_refunded < amount_captured:
+            to_reverse = max(1, int((total_credits * amount_refunded) / amount_captured))
+        else:
+            to_reverse = total_credits
+
+        refund_id = str(getattr(refund, "id", "") or "")
+        refund_ref = f"stripe:refund:{refund_id}" if refund_id else f"stripe:refund:pi:{pi_id}:{int(datetime.now(timezone.utc).timestamp())}"
+
+        for credit_row in matched:
+            cdetails = dict(credit_row.details) if isinstance(credit_row.details, dict) else {}
+            cdetails["refunded"] = True
+            cdetails["refunded_at"] = datetime.now(timezone.utc).isoformat()
+            cdetails["refund_reference"] = refund_ref
+            if credit_note is not None:
+                cdetails["credit_note_id"] = str(getattr(credit_note, "id", "") or "")
+            credit_row.details = cdetails
+            db.add(credit_row)
+
+        db.add(SmsCreditLedger(
+            user_id=payload.user_id,
+            entry_type="debit",
+            amount=to_reverse,
+            reason="stripe_refund_reversal",
+            reference_id=refund_ref,
+            details={
+                "source": "admin_refund_api",
+                "payment_intent_id": pi_id,
+                "stripe_refund_id": str(getattr(refund, "id", "") or ""),
+                "stripe_invoice_id": payload.invoice_id,
+                "stripe_credit_note_id": str(getattr(credit_note, "id", "") or "") if credit_note is not None else None,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ))
+        db.commit()
+
+    return {
+        "ok": True,
+        "payment_intent_id": pi_id,
+        "refund_id": str(getattr(refund, "id", "") or ""),
+        "credit_note_id": str(getattr(credit_note, "id", "") or "") if credit_note is not None else None,
     }
