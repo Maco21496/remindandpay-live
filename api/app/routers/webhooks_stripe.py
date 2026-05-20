@@ -374,9 +374,14 @@ def _handle_checkout_completed(db: Session, event: dict):
     quantity = int(metadata.get("quantity") or metadata.get("credits") or 0)
     if quantity <= 0:
         return
-    invoice_details = _resolve_topup_invoice_details(_get_stripe_client(), payment_intent_id)
-    amount_minor = int(metadata.get("amount_minor") or 0)
+    stripe_client = _get_stripe_client()
     checkout_session_id = str(getattr(obj, "id", "") or "")
+    invoice_details = _resolve_checkout_invoice_details(stripe_client, obj, checkout_session_id=checkout_session_id, payment_intent_id=payment_intent_id)
+    amount_minor = int(metadata.get("amount_minor") or 0)
+    txn_details = {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")}
+    stripe_invoice_number = invoice_details.get("stripe_invoice_number")
+    if stripe_invoice_number:
+        txn_details["stripe_invoice_number"] = stripe_invoice_number
     txn = _record_billing_transaction(db, {
         "user_id": user_id,
         "initiated_by_user_id": user_id,
@@ -394,8 +399,15 @@ def _handle_checkout_completed(db: Session, event: dict):
         "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
         "stripe_event_id": event["id"],
         "idempotency_key": f"stripe:checkout_session:{checkout_session_id}",
-        "details": {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")},
+        "details": txn_details,
     })
+    if txn and not txn.stripe_invoice_id and invoice_details.get("stripe_invoice_id"):
+        txn.stripe_invoice_id = invoice_details.get("stripe_invoice_id")
+        existing_details = dict(txn.details) if isinstance(txn.details, dict) else {}
+        if stripe_invoice_number and not existing_details.get("stripe_invoice_number"):
+            existing_details["stripe_invoice_number"] = stripe_invoice_number
+        txn.details = existing_details
+        db.add(txn)
     _apply_sms_ledger_for_transaction(db, txn)
     db.commit()
 
@@ -535,6 +547,38 @@ def _resolve_topup_invoice_details(stripe_client, payment_intent_id: str) -> dic
         "invoice_retry_max_attempts": _TOPUP_RETRY_MAX_ATTEMPTS,
         "next_retry_at": None,
     }
+
+
+def _resolve_checkout_invoice_details(stripe_client, session_obj, *, checkout_session_id: str, payment_intent_id: str) -> dict:
+    invoice_id = _stripe_obj_id(getattr(session_obj, "invoice", None))
+    invoice_number = None
+    invoice_ref = getattr(session_obj, "invoice", None)
+    if hasattr(invoice_ref, "number"):
+        invoice_number = getattr(invoice_ref, "number", None)
+
+    if not invoice_id and checkout_session_id:
+        try:
+            expanded = stripe_client.checkout.Session.retrieve(checkout_session_id, expand=["invoice", "payment_intent"])
+            invoice_id = _stripe_obj_id(getattr(expanded, "invoice", None))
+            expanded_invoice = getattr(expanded, "invoice", None)
+            if hasattr(expanded_invoice, "number"):
+                invoice_number = getattr(expanded_invoice, "number", None)
+        except Exception:
+            pass
+
+    details = {}
+    if invoice_id:
+        details["stripe_invoice_id"] = invoice_id
+    if invoice_number:
+        details["stripe_invoice_number"] = invoice_number
+
+    if not invoice_id:
+        fallback = _resolve_topup_invoice_details(stripe_client, payment_intent_id)
+        if fallback.get("stripe_invoice_id"):
+            details["stripe_invoice_id"] = fallback.get("stripe_invoice_id")
+        if fallback.get("stripe_invoice_number"):
+            details["stripe_invoice_number"] = fallback.get("stripe_invoice_number")
+    return details
 
 
 def _retry_delay_for_attempt(attempt: int) -> timedelta:
