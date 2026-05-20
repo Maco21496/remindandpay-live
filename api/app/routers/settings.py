@@ -409,7 +409,7 @@ def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_
             "document_error": document_error,
         })
 
-    return {"invoices": invoices}
+    return {"billing_invoice_route_version": "local_txn_doc_hydration_v3", "invoices": invoices}
 
 
 
