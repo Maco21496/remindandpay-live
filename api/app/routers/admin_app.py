@@ -731,6 +731,47 @@ def admin_reconcile_topup_anomalies(
     }
 
 
+
+@router.get("/billing/user-invoices")
+def admin_user_invoices(
+    user_id: int,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+):
+    import stripe
+
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
+
+    profile = db.query(AccountBillingProfile).filter(AccountBillingProfile.user_id == user_id).first()
+    if not profile or not profile.stripe_customer_id:
+        return {"invoices": []}
+
+    limit = max(1, min(int(limit or 30), 100))
+    invoices = stripe.Invoice.list(customer=profile.stripe_customer_id, limit=limit)
+    rows = []
+    for inv in invoices.auto_paging_iter():
+        inv_id = str(getattr(inv, "id", "") or "")
+        inv_number = str(getattr(inv, "number", "") or "")
+        inv_status = str(getattr(inv, "status", "") or "")
+        inv_pi = str(getattr(getattr(inv, "payment_intent", None), "id", None) or getattr(inv, "payment_intent", "") or "")
+        rows.append({
+            "id": inv_id,
+            "number": inv_number,
+            "status": inv_status,
+            "created": getattr(inv, "created", None),
+            "amount_due": getattr(inv, "amount_due", None),
+            "currency": getattr(inv, "currency", None),
+            "payment_intent_id": inv_pi,
+            "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None),
+        })
+
+    rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+    return {"invoices": rows[:limit]}
+
+
 class AdminRefundTopupIn(BaseModel):
     user_id: int
     invoice_id: str

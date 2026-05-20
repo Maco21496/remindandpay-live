@@ -371,18 +371,43 @@
 
 <script>
   async function adminRefundTopup(userId) {
-    const invoiceId = window.prompt(`Enter Stripe invoice id for user ${userId} (e.g. in_...)`);
-    if (!invoiceId) return;
-
-    const amountRaw = window.prompt('Optional refund amount in pence (leave blank for full refund):', '');
-    const reason = window.prompt('Optional refund reason for credit note memo:', 'Admin-approved refund') || '';
-
-    const payload = { user_id: userId, invoice_id: invoiceId.trim(), reason };
-    if (amountRaw && /^\d+$/.test(amountRaw.trim())) {
-      payload.amount_pence = parseInt(amountRaw.trim(), 10);
-    }
-
     try {
+      const invRes = await fetch(`/admin/billing/user-invoices?user_id=${encodeURIComponent(userId)}&limit=30`, {
+        credentials: 'include',
+        cache: 'no-store'
+      });
+      const invData = await invRes.json();
+      if (!invRes.ok) throw new Error(invData.detail || `Failed to load invoices (${invRes.status})`);
+      const invoices = Array.isArray(invData.invoices) ? invData.invoices : [];
+      if (!invoices.length) {
+        window.alert('No invoices found for this user.');
+        return;
+      }
+
+      const listText = invoices.map((x, i) => {
+        const dt = x.created ? new Date(x.created * 1000).toLocaleString() : '-';
+        const amt = typeof x.amount_due === 'number' ? (x.amount_due / 100).toFixed(2) : '-';
+        const ccy = (x.currency || '').toUpperCase();
+        return `${i + 1}. ${x.id} | ${dt} | ${x.status || '-'} | ${ccy} ${amt}`;
+      }).join('\n');
+
+      const pickRaw = window.prompt(`Pick invoice number to refund for user ${userId}:\n\n${listText}`, '1');
+      if (!pickRaw) return;
+      const pick = parseInt(pickRaw, 10);
+      if (!Number.isFinite(pick) || pick < 1 || pick > invoices.length) {
+        window.alert('Invalid selection.');
+        return;
+      }
+
+      const invoice = invoices[pick - 1];
+      const amountRaw = window.prompt('Optional refund amount in pence (leave blank for full refund):', '');
+      const reason = window.prompt('Optional refund reason for credit note memo:', 'Admin-approved refund') || '';
+
+      const payload = { user_id: userId, invoice_id: invoice.id, reason };
+      if (amountRaw && /^\d+$/.test(amountRaw.trim())) {
+        payload.amount_pence = parseInt(amountRaw.trim(), 10);
+      }
+
       const r = await fetch('/admin/billing/refund-topup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -393,7 +418,7 @@
       if (!r.ok) {
         throw new Error(data.detail || `Refund failed (${r.status})`);
       }
-      window.alert(`Refund complete. Refund ID: ${data.refund_id || '-'}\nCredit note ID: ${data.credit_note_id || 'not created'}`);
+      window.alert(`Refund complete.\nInvoice: ${invoice.id}\nRefund ID: ${data.refund_id || '-'}\nCredit note ID: ${data.credit_note_id || 'not created'}`);
     } catch (err) {
       window.alert(`Refund failed: ${err.message || err}`);
     }
