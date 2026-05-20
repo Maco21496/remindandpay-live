@@ -797,6 +797,10 @@ class AdminRefundTopupIn(BaseModel):
     reason: str | None = None
 
 
+def _is_valid_refund_id(refund_id: str) -> bool:
+    return str(refund_id or "").strip().startswith("re_")
+
+
 @router.post("/billing/refund-topup")
 def admin_refund_topup(
     payload: AdminRefundTopupIn,
@@ -838,6 +842,7 @@ def admin_refund_topup(
         .filter(AccountBillingTransaction.parent_transaction_id == original.id)
         .filter(AccountBillingTransaction.transaction_type == "refund")
         .filter(AccountBillingTransaction.status.in_(["succeeded", "pending"]))
+        .filter(AccountBillingTransaction.stripe_refund_id.like("re_%"))
         .scalar()
         or 0
     )
@@ -853,26 +858,50 @@ def admin_refund_topup(
             raise HTTPException(status_code=400, detail="Requested refund amount exceeds refundable amount")
         refund_kwargs["amount"] = req_amount
     refund = stripe.Refund.create(**refund_kwargs)
+    refund_id = str(getattr(refund, "id", "") or "").strip()
+    if not _is_valid_refund_id(refund_id):
+        raise HTTPException(status_code=500, detail=f"Stripe returned invalid refund id: {refund_id}")
 
     credit_note = None
+    credit_note_error = None
     try:
-        credit_note_kwargs = {"invoice": original.stripe_invoice_id, "reason": "requested_by_customer", "memo": (payload.reason or "Admin-approved refund").strip()[:500]}
-        if payload.amount_pence and int(payload.amount_pence) > 0:
-            credit_note_kwargs["amount"] = int(payload.amount_pence)
         if original.stripe_invoice_id:
+            refund_amount_minor = int(getattr(refund, "amount", 0) or 0)
+            credit_note_kwargs = {
+                "invoice": original.stripe_invoice_id,
+                "amount": refund_amount_minor,
+                "reason": "order_change",
+                "memo": (payload.reason or "Admin-approved refund").strip()[:500],
+                "refunds": [{"type": "refund", "refund": refund_id, "amount_refunded": refund_amount_minor}],
+                "metadata": {"source": "admin_refund_api", "billing_transaction_id": str(original.id), "user_id": str(original.user_id)},
+            }
             credit_note = stripe.CreditNote.create(**credit_note_kwargs)
-    except Exception:
+    except Exception as exc:
         credit_note = None
+        credit_note_error = f"{exc.__class__.__name__}: {exc}"
 
     amount_refunded = int(getattr(refund, "amount", 0) or 0)
     amount_total = max(1, int(abs(original.amount_minor or 0)))
     quantity = int(original.quantity or 0)
     reversal_quantity = quantity if amount_refunded >= amount_total else max(1, int((quantity * amount_refunded) / amount_total))
 
-    refund_id = str(getattr(refund, "id", "") or "")
     credit_note_id = str(getattr(credit_note, "id", "") or "") if credit_note is not None else None
-
-    txn = AccountBillingTransaction(
+    existing_refund_txn = (
+        db.query(AccountBillingTransaction)
+        .filter(
+            (AccountBillingTransaction.stripe_refund_id == refund_id)
+            | (AccountBillingTransaction.idempotency_key == f"stripe:refund:{refund_id}")
+        )
+        .first()
+    )
+    if existing_refund_txn:
+        txn = existing_refund_txn
+        if credit_note_id and not txn.stripe_credit_note_id:
+            txn.stripe_credit_note_id = credit_note_id
+        txn.details = {**(dict(txn.details) if isinstance(txn.details, dict) else {}), **({"credit_note_error": credit_note_error} if credit_note_error else {})}
+        db.add(txn)
+    else:
+        txn = AccountBillingTransaction(
         user_id=original.user_id,
         initiated_by_user_id=owner.id,
         transaction_type="refund",
@@ -890,19 +919,22 @@ def admin_refund_topup(
         stripe_refund_id=refund_id,
         stripe_credit_note_id=credit_note_id,
         idempotency_key=f"stripe:refund:{refund_id}",
-        details={"source": "admin_refund_api"},
+        details={"source": "admin_refund_api", **({"credit_note_error": credit_note_error} if credit_note_error else {})},
         sms_ledger_processed_at=datetime.now(timezone.utc),
-    )
-    db.add(txn)
-    db.flush()
+        )
+        db.add(txn)
+        db.flush()
     ref = f"billing_txn:{txn.id}:refund"
-    if not db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == ref).first():
-        db.add(SmsCreditLedger(user_id=original.user_id, entry_type="debit", amount=reversal_quantity, reason="billing_transaction_refund_reversal", reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_refund_id": txn.stripe_refund_id, "stripe_credit_note_id": txn.stripe_credit_note_id}))
+    ledger_row = db.query(SmsCreditLedger).filter(SmsCreditLedger.billing_transaction_id == txn.id).first()
+    if not ledger_row:
+        ledger_row = SmsCreditLedger(user_id=original.user_id, entry_type="debit", amount=reversal_quantity, reason="billing_transaction_refund_reversal", reference_id=ref, billing_transaction_id=txn.id, details={"billing_transaction_id": txn.id, "stripe_refund_id": txn.stripe_refund_id, "stripe_credit_note_id": txn.stripe_credit_note_id})
+        db.add(ledger_row)
+        db.flush()
 
-    prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id==original.id, AccountBillingTransaction.transaction_type=="refund", AccountBillingTransaction.status=="succeeded").all()
+    prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id==original.id, AccountBillingTransaction.transaction_type=="refund", AccountBillingTransaction.status=="succeeded", AccountBillingTransaction.stripe_refund_id.like("re_%")).all()
     total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
     original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
     db.add(original)
     db.commit()
 
-    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "billing_transaction_id": txn.id}
+    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": getattr(credit_note, "pdf", None) if credit_note is not None else None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status}

@@ -405,6 +405,32 @@ def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(
         "credit_note_pdf": getattr(cn, "pdf", None),
     }
 
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if not row.stripe_credit_note_id:
+        return {
+            "available": False,
+            "message": "Credit note is unavailable for this transaction.",
+        }
+
+    stripe_client = _get_stripe_client()
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
+
     return {
         "available": bool(getattr(inv, "invoice_pdf", None) or getattr(inv, "hosted_invoice_url", None)),
         "stripe_invoice_id": row.stripe_invoice_id,

@@ -285,6 +285,11 @@ def _record_billing_transaction(db: Session, payload: dict) -> AccountBillingTra
     return txn
 
 
+def _is_valid_refund_id(refund_id: str) -> bool:
+    rid = str(refund_id or "").strip()
+    return rid.startswith("re_")
+
+
 def _apply_sms_ledger_for_transaction(db: Session, txn: AccountBillingTransaction):
     if txn.sms_ledger_processed_at is not None or txn.status != "succeeded":
         return
@@ -307,8 +312,8 @@ def _apply_sms_ledger_for_transaction(db: Session, txn: AccountBillingTransactio
 def _handle_charge_refunded(db: Session, event: dict):
     obj = event["data"]["object"]
     payment_intent_id = _stripe_obj_id(getattr(obj, "payment_intent", None))
-    refund_id = _stripe_obj_id(getattr(obj, "id", None))
-    if not payment_intent_id or not refund_id:
+    charge_id = _stripe_obj_id(getattr(obj, "id", None))
+    if not payment_intent_id:
         return
 
     original = (
@@ -320,35 +325,71 @@ def _handle_charge_refunded(db: Session, event: dict):
     if not original:
         return
 
-    amount_refunded = int(getattr(obj, "amount_refunded", 0) or 0)
-    amount_captured = int(getattr(obj, "amount_captured", 0) or 0)
-    quantity = original.quantity or 0
-    if amount_refunded > 0 and amount_captured > 0 and amount_refunded < amount_captured and quantity:
-        quantity = max(1, int((quantity * amount_refunded) / amount_captured))
+    refund_objects = []
+    refunds_container = getattr(obj, "refunds", None)
+    refunds_data = getattr(refunds_container, "data", None) if refunds_container is not None else None
+    if isinstance(refunds_data, list):
+        refund_objects.extend(refunds_data)
 
-    checkout_session_id = str(getattr(obj, "id", "") or "")
-    txn = _record_billing_transaction(db, {
-        "user_id": original.user_id,
-        "initiated_by_user_id": None,
-        "transaction_type": "refund",
-        "product_type": original.product_type,
-        "product_code": original.product_code,
-        "description": f"Refund for transaction #{original.id}",
-        "status": "succeeded",
-        "amount_minor": -abs(amount_refunded),
-        "currency": original.currency,
-        "quantity": quantity,
-        "parent_transaction_id": original.id,
-        "stripe_customer_id": original.stripe_customer_id,
-        "stripe_payment_intent_id": payment_intent_id,
-        "stripe_charge_id": _stripe_obj_id(getattr(obj, "charge", None)),
-        "stripe_refund_id": refund_id,
-        "stripe_event_id": event["id"],
-        "idempotency_key": f"stripe:refund:{refund_id}",
-        "details": {"stripe_source": "charge.refunded"},
-    })
-    _apply_sms_ledger_for_transaction(db, txn)
-    original.status = "refunded" if quantity >= (original.quantity or 0) else "partially_refunded"
+    if not refund_objects and charge_id:
+        try:
+            stripe_client = _get_stripe_client()
+            listed = stripe_client.Refund.list(charge=charge_id, limit=100)
+            refund_objects.extend(getattr(listed, "data", None) or [])
+        except Exception:
+            pass
+
+    if not refund_objects:
+        logger.warning("charge.refunded without resolvable refund objects: charge_id=%s event_id=%s", charge_id, event.get("id"))
+        return
+
+    for refund_obj in refund_objects:
+        refund_id = _stripe_obj_id(getattr(refund_obj, "id", None) if not isinstance(refund_obj, dict) else refund_obj.get("id"))
+        if not _is_valid_refund_id(refund_id):
+            continue
+        idem_key = f"stripe:refund:{refund_id}"
+        existing = (
+            db.query(AccountBillingTransaction)
+            .filter(
+                (AccountBillingTransaction.stripe_refund_id == refund_id)
+                | (AccountBillingTransaction.idempotency_key == idem_key)
+            )
+            .first()
+        )
+        if existing:
+            continue
+
+        amount_refunded = int(getattr(refund_obj, "amount", 0) if not isinstance(refund_obj, dict) else refund_obj.get("amount", 0) or 0)
+        amount_total = max(1, int(abs(original.amount_minor or 0)))
+        quantity = int(original.quantity or 0)
+        reversal_quantity = quantity if amount_refunded >= amount_total else max(1, int((quantity * amount_refunded) / amount_total))
+
+        txn = _record_billing_transaction(db, {
+            "user_id": original.user_id,
+            "initiated_by_user_id": None,
+            "transaction_type": "refund",
+            "product_type": original.product_type,
+            "product_code": original.product_code,
+            "description": f"Refund for transaction #{original.id}",
+            "status": "succeeded",
+            "amount_minor": -abs(amount_refunded),
+            "currency": original.currency,
+            "quantity": reversal_quantity,
+            "parent_transaction_id": original.id,
+            "stripe_customer_id": original.stripe_customer_id,
+            "stripe_payment_intent_id": payment_intent_id,
+            "stripe_charge_id": charge_id,
+            "stripe_invoice_id": original.stripe_invoice_id,
+            "stripe_refund_id": refund_id,
+            "stripe_event_id": event["id"],
+            "idempotency_key": idem_key,
+            "details": {"stripe_source": "charge.refunded"},
+        })
+        _apply_sms_ledger_for_transaction(db, txn)
+
+    prior = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.parent_transaction_id == original.id, AccountBillingTransaction.transaction_type == "refund", AccountBillingTransaction.status == "succeeded", AccountBillingTransaction.stripe_refund_id.like("re_%")).all()
+    total_refunded = sum(abs(int(r.amount_minor or 0)) for r in prior)
+    original.status = "refunded" if total_refunded >= abs(int(original.amount_minor or 0)) else "partially_refunded"
     db.add(original)
     db.commit()
 
