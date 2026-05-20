@@ -348,6 +348,80 @@ def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_
     if not row.stripe_invoice_id:
         return {"available": False, "message": "Invoice document is unavailable for this transaction."}
     stripe_client = _get_stripe_client()
+    invoices = []
+    for row in rows:
+        details = dict(row.details) if isinstance(row.details, dict) else {}
+        document_error = None
+        stripe_invoice_number = details.get("stripe_invoice_number")
+        stripe_invoice_status = None
+        stripe_invoice_finalized_at = None
+        hosted_invoice_url = None
+        invoice_pdf = None
+        credit_note_url = None
+        credit_note_pdf = None
+
+        if row.stripe_invoice_id:
+            try:
+                inv = stripe_client.Invoice.retrieve(row.stripe_invoice_id)
+                stripe_invoice_number = getattr(inv, "number", None) or stripe_invoice_number
+                stripe_invoice_status = getattr(inv, "status", None)
+                status_transitions = getattr(inv, "status_transitions", None)
+                stripe_invoice_finalized_at = (
+                    getattr(status_transitions, "finalized_at", None)
+                    if status_transitions is not None
+                    else None
+                )
+                hosted_invoice_url = getattr(inv, "hosted_invoice_url", None)
+                invoice_pdf = getattr(inv, "invoice_pdf", None)
+            except Exception as exc:
+                document_error = f"invoice_retrieve_failed:{exc.__class__.__name__}:{exc}"
+
+        if row.stripe_credit_note_id:
+            try:
+                cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+                credit_note_pdf = getattr(cn, "pdf", None)
+                credit_note_url = getattr(cn, "pdf", None) or getattr(cn, "credit_note_pdf", None)
+            except Exception as exc:
+                if not document_error:
+                    document_error = f"credit_note_retrieve_failed:{exc.__class__.__name__}:{exc}"
+
+        invoices.append({
+            "id": row.id,
+            "number": stripe_invoice_number or row.stripe_invoice_id,
+            "status": row.status,
+            "currency": (row.currency or "").upper(),
+            "amount_due": row.amount_minor,
+            "amount_paid": row.amount_minor,
+            "created": int(row.created_at.timestamp()) if row.created_at else None,
+            "hosted_invoice_url": hosted_invoice_url,
+            "invoice_pdf": invoice_pdf,
+            "kind": row.product_type,
+            "transaction_type": row.transaction_type,
+            "product_code": row.product_code,
+            "parent_transaction_id": row.parent_transaction_id,
+            "stripe_invoice_id": row.stripe_invoice_id,
+            "stripe_invoice_number": stripe_invoice_number,
+            "stripe_invoice_status": stripe_invoice_status,
+            "stripe_invoice_finalized_at": stripe_invoice_finalized_at,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "credit_note_url": credit_note_url,
+            "credit_note_pdf": credit_note_pdf,
+            "document_error": document_error,
+        })
+
+    return {"invoices": invoices}
+
+
+
+
+@router.get("/billing/documents/invoice/{transaction_id}")
+def get_billing_invoice_document(transaction_id: int, db: Session = Depends(get_db), user=Depends(require_user)):
+    row = db.query(AccountBillingTransaction).filter(AccountBillingTransaction.id == transaction_id, AccountBillingTransaction.user_id == user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not row.stripe_invoice_id:
+        return {"available": False, "message": "Invoice document is unavailable for this transaction."}
+    stripe_client = _get_stripe_client()
     inv = stripe_client.Invoice.retrieve(row.stripe_invoice_id)
     return {"available": bool(getattr(inv, "invoice_pdf", None)), "invoice_pdf": getattr(inv, "invoice_pdf", None), "hosted_invoice_url": getattr(inv, "hosted_invoice_url", None)}
 
