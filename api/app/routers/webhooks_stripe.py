@@ -607,6 +607,13 @@ def _resolve_checkout_invoice_details(stripe_client, session_obj, *, checkout_se
         except Exception:
             pass
 
+    if invoice_id and not invoice_number:
+        try:
+            inv = stripe_client.Invoice.retrieve(invoice_id)
+            invoice_number = getattr(inv, "number", None)
+        except Exception:
+            pass
+
     details = {}
     if invoice_id:
         details["stripe_invoice_id"] = invoice_id

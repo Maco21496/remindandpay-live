@@ -267,6 +267,8 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
         invoice_pdf = None
         credit_note_url = None
         credit_note_pdf = None
+        stripe_credit_note_number = details.get("stripe_credit_note_number")
+        credit_note_status = details.get("credit_note_status")
 
         if row.stripe_invoice_id:
             try:
@@ -291,6 +293,8 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
                 cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
                 credit_note_pdf = getattr(cn, "pdf", None)
                 credit_note_url = getattr(cn, "pdf", None) or getattr(cn, "credit_note_pdf", None)
+                stripe_credit_note_number = getattr(cn, "number", None) or stripe_credit_note_number
+                credit_note_status = getattr(cn, "status", None) or credit_note_status
             except Exception as exc:
                 if not document_error:
                     document_error = f"credit_note_retrieve_failed:{exc.__class__.__name__}:{exc}"
@@ -314,6 +318,8 @@ def get_billing_invoices(limit: int = 20, db: Session = Depends(get_db), user=De
             "stripe_invoice_status": stripe_invoice_status,
             "stripe_invoice_finalized_at": stripe_invoice_finalized_at,
             "stripe_credit_note_id": row.stripe_credit_note_id,
+            "stripe_credit_note_number": stripe_credit_note_number,
+            "credit_note_status": credit_note_status,
             "credit_note_url": credit_note_url,
             "credit_note_pdf": credit_note_pdf,
             "document_error": document_error,
@@ -389,6 +395,21 @@ def get_billing_credit_note_document(transaction_id: int, db: Session = Depends(
         }
 
     stripe_client = _get_stripe_client()
+
+    try:
+        cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)
+    except Exception as exc:
+        return {
+            "available": False,
+            "stripe_credit_note_id": row.stripe_credit_note_id,
+            "message": f"Unable to retrieve credit note: {exc.__class__.__name__}: {exc}",
+        }
+
+    return {
+        "available": bool(getattr(cn, "pdf", None)),
+        "stripe_credit_note_id": row.stripe_credit_note_id,
+        "credit_note_pdf": getattr(cn, "pdf", None),
+    }
 
     try:
         cn = stripe_client.CreditNote.retrieve(row.stripe_credit_note_id)

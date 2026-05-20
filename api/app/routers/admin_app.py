@@ -739,6 +739,11 @@ def admin_user_invoices(
     db: Session = Depends(get_db),
     owner: User = Depends(require_owner),
 ):
+    import stripe
+
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe_client = stripe if stripe.api_key else None
+
     limit = max(1, min(int(limit or 30), 100))
     payment_rows = (
         db.query(AccountBillingTransaction)
@@ -768,7 +773,18 @@ def admin_user_invoices(
             continue
 
         details = dict(tx.details) if isinstance(tx.details, dict) else {}
-        number = details.get("stripe_invoice_number") or tx.stripe_invoice_id or str(tx.id)
+        stripe_invoice_number = details.get("stripe_invoice_number")
+        if not stripe_invoice_number and tx.stripe_invoice_id and stripe_client is not None:
+            try:
+                inv = stripe_client.Invoice.retrieve(tx.stripe_invoice_id)
+                stripe_invoice_number = getattr(inv, "number", None)
+                if stripe_invoice_number:
+                    details["stripe_invoice_number"] = stripe_invoice_number
+                    tx.details = details
+                    db.add(tx)
+            except Exception:
+                pass
+        number = stripe_invoice_number or tx.stripe_invoice_id or str(tx.id)
         rows.append({
             "id": tx.id,
             "billing_transaction_id": tx.id,
@@ -786,6 +802,7 @@ def admin_user_invoices(
             "stripe_payment_intent_id": tx.stripe_payment_intent_id,
         })
 
+    db.commit()
     return {"invoices": rows[:limit]}
 
 
@@ -886,6 +903,9 @@ def admin_refund_topup(
     reversal_quantity = quantity if amount_refunded >= amount_total else max(1, int((quantity * amount_refunded) / amount_total))
 
     credit_note_id = str(getattr(credit_note, "id", "") or "") if credit_note is not None else None
+    credit_note_number = str(getattr(credit_note, "number", "") or "") if credit_note is not None else None
+    credit_note_pdf = str(getattr(credit_note, "pdf", "") or "") if credit_note is not None else None
+    credit_note_status = str(getattr(credit_note, "status", "") or "") if credit_note is not None else None
     existing_refund_txn = (
         db.query(AccountBillingTransaction)
         .filter(
@@ -898,7 +918,16 @@ def admin_refund_topup(
         txn = existing_refund_txn
         if credit_note_id and not txn.stripe_credit_note_id:
             txn.stripe_credit_note_id = credit_note_id
-        txn.details = {**(dict(txn.details) if isinstance(txn.details, dict) else {}), **({"credit_note_error": credit_note_error} if credit_note_error else {})}
+        txn_details = dict(txn.details) if isinstance(txn.details, dict) else {}
+        if credit_note_number:
+            txn_details["stripe_credit_note_number"] = credit_note_number
+        if credit_note_pdf:
+            txn_details["credit_note_pdf"] = credit_note_pdf
+        if credit_note_status:
+            txn_details["credit_note_status"] = credit_note_status
+        if credit_note_error:
+            txn_details["credit_note_error"] = credit_note_error
+        txn.details = txn_details
         db.add(txn)
     else:
         txn = AccountBillingTransaction(
@@ -919,7 +948,13 @@ def admin_refund_topup(
         stripe_refund_id=refund_id,
         stripe_credit_note_id=credit_note_id,
         idempotency_key=f"stripe:refund:{refund_id}",
-        details={"source": "admin_refund_api", **({"credit_note_error": credit_note_error} if credit_note_error else {})},
+        details={
+            "source": "admin_refund_api",
+            **({"stripe_credit_note_number": credit_note_number} if credit_note_number else {}),
+            **({"credit_note_pdf": credit_note_pdf} if credit_note_pdf else {}),
+            **({"credit_note_status": credit_note_status} if credit_note_status else {}),
+            **({"credit_note_error": credit_note_error} if credit_note_error else {}),
+        },
         sms_ledger_processed_at=datetime.now(timezone.utc),
         )
         db.add(txn)
@@ -937,4 +972,4 @@ def admin_refund_topup(
     db.add(original)
     db.commit()
 
-    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": getattr(credit_note, "pdf", None) if credit_note is not None else None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status}
+    return {"ok": True, "payment_intent_id": pi_id, "refund_id": txn.stripe_refund_id, "credit_note_id": txn.stripe_credit_note_id, "credit_note_pdf": credit_note_pdf or None, "credit_note_error": credit_note_error, "billing_transaction_id": txn.id, "sms_ledger_entry_id": ledger_row.id if ledger_row is not None else None, "original_transaction_id": original.id, "original_status": original.status}
