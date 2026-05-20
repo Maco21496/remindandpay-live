@@ -52,12 +52,15 @@ def create_checkout_session(
 
     stripe_client = _get_stripe_client()
 
+    credits = int(package["credits"])
+    product_code = f"sms_topup_{credits}"
+
     topup_metadata = {
         "account_id": str(user.id),
         "user_id": str(user.id),
         "product_type": "sms_topup",
-        "product_code": f"sms_topup_{package["credits"]}",
-        "quantity": str(package["credits"]),
+        "product_code": product_code,
+        "quantity": str(credits),
         "amount_minor": str(int(package_key) * 100),
         "currency": "GBP",
         "kind": "sms_topup",
@@ -323,6 +326,7 @@ def _handle_charge_refunded(db: Session, event: dict):
     if amount_refunded > 0 and amount_captured > 0 and amount_refunded < amount_captured and quantity:
         quantity = max(1, int((quantity * amount_refunded) / amount_captured))
 
+    checkout_session_id = str(getattr(obj, "id", "") or "")
     txn = _record_billing_transaction(db, {
         "user_id": original.user_id,
         "initiated_by_user_id": None,
@@ -388,7 +392,7 @@ def _handle_checkout_completed(db: Session, event: dict):
         "stripe_payment_intent_id": payment_intent_id,
         "stripe_invoice_id": invoice_details.get("stripe_invoice_id"),
         "stripe_event_id": event["id"],
-        "idempotency_key": f"stripe:checkout_session:{str(getattr(obj, "id", "") or "")}",
+        "idempotency_key": f"stripe:checkout_session:{checkout_session_id}",
         "details": {"stripe_source": "checkout.session.completed", "package_key": metadata.get("package_key")},
     })
     _apply_sms_ledger_for_transaction(db, txn)
