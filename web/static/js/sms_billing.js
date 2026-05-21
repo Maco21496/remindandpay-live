@@ -73,11 +73,10 @@
   const limit = 50;
 
   function renderRow(entry) {
-    const details = entry.details || {};
-    const segments = details.segments ?? "-";
-    const isRefundReversal = entry.reason === "stripe_refund_reversal";
-    const direction = isRefundReversal ? "Refund" : (entry.entry_type === "debit" ? "Outbound" : "Credit");
-    const to = details.to || "-";
+    const direction = entry.category || (entry.entry_type === "debit" ? "Debit" : "Credit");
+    const description = entry.description || entry.reason || "-";
+    const to = entry.to_display || "-";
+    const segments = entry.segments_display ?? "-";
     const credits = entry.entry_type === "debit" ? `-${entry.amount}` : `+${entry.amount}`;
     const balance = entry.balance_after ?? "";
 
@@ -85,6 +84,7 @@
       <tr>
         <td>${fmtDT(entry.created_at)}</td>
         <td>${direction}</td>
+        <td>${description}</td>
         <td>${to}</td>
         <td>${segments}</td>
         <td style="text-align:right;">${credits}</td>

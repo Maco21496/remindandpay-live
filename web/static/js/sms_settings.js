@@ -7,6 +7,13 @@
   const creditsInput = $("sms_credits");
   const phoneNumberInput = $("sms_phone_number");
   const phoneSidInput = $("sms_phone_sid");
+  const dedicatedNumberValue = $("sms_dedicated_number_value");
+  const nextRenewalValue = $("sms_next_renewal_value");
+  const monthlyRenewalCostValue = $("sms_monthly_renewal_cost_value");
+  const renewalOverdueRow = $("sms_renewal_overdue_row");
+  const renewalOverdueValue = $("sms_renewal_overdue_value");
+  const releasedRow = $("sms_released_row");
+  const releasedValue = $("sms_released_value");
   const forwardingSel = $("sms_forwarding_enabled");
   const forwardToInput = $("sms_forward_to");
   const msg = $("sms_msg");
@@ -67,6 +74,9 @@
     balanceChip.href = isEnabled ? "/sms_billing" : "/settings#sms";
     balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
   }
+  const fmtDT = (iso) => (window.AppDate && AppDate.formatDateTime)
+    ? AppDate.formatDateTime(iso)
+    : (iso ? (new Date(iso)).toLocaleString() : "-");
 
   function activateSmsTab() {
     const smsTabBtn = document.querySelector('#set_tabs .tab[data-tab="sms"]');
@@ -142,6 +152,13 @@
 
       if (phoneNumberInput) phoneNumberInput.value = data.twilio_phone_number || "";
       if (phoneSidInput) phoneSidInput.value = data.twilio_phone_sid || "";
+      if (dedicatedNumberValue) dedicatedNumberValue.textContent = data.twilio_phone_number || "-";
+      if (nextRenewalValue) nextRenewalValue.textContent = data.next_number_charge_at ? fmtDT(data.next_number_charge_at) : "-";
+      if (monthlyRenewalCostValue) monthlyRenewalCostValue.textContent = Number.isFinite(data.sms_monthly_number_cost) ? `${data.sms_monthly_number_cost} credits` : "-";
+      if (renewalOverdueRow) renewalOverdueRow.style.display = data.past_due_since ? "" : "none";
+      if (renewalOverdueValue) renewalOverdueValue.textContent = data.past_due_since ? fmtDT(data.past_due_since) : "-";
+      if (releasedRow) releasedRow.style.display = data.released_at ? "" : "none";
+      if (releasedValue) releasedValue.textContent = data.released_at ? `${fmtDT(data.released_at)}${data.release_reason ? ` (${data.release_reason})` : ""}` : "-";
       if (forwardToInput) forwardToInput.value = data.forward_to_phone || "";
       setFieldsEnabled(currentEnabled);
       lockEnabledToggle(currentEnabled);
