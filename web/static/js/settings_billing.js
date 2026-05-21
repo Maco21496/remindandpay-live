@@ -58,18 +58,10 @@
         if (invEmpty) invEmpty.style.display = 'block';
       } else {
         invRows.innerHTML = rows.map((x) => {
-          const txType = (x.transaction_type || '').toLowerCase();
-          const docHtml = txType === 'refund'
-            ? (x.credit_note_pdf
-                ? `<a href="${x.credit_note_pdf}" target="_blank" rel="noopener">Credit note PDF</a>`
-                : (x.credit_note_url ? `<a href="${x.credit_note_url}" target="_blank" rel="noopener">View credit note</a>` : '-'))
-            : (() => {
-                const view = x.hosted_invoice_url ? `<a href="${x.hosted_invoice_url}" target="_blank" rel="noopener">View</a>` : '';
-                const pdf = x.invoice_pdf ? `<a href="${x.invoice_pdf}" target="_blank" rel="noopener">Invoice PDF</a>` : '';
-                return (view || pdf) ? `${view} ${pdf}`.trim() : '-';
-              })();
+          const view = x.hosted_invoice_url ? `<a href="${x.hosted_invoice_url}" target="_blank" rel="noopener">View</a>` : '-';
+          const pdf = x.invoice_pdf ? `<a href="${x.invoice_pdf}" target="_blank" rel="noopener">PDF</a>` : '-';
           const kindLabel = (x.kind === 'membership') ? 'subscription' : (x.kind || '-');
-          return `<tr><td>${fmtDate(x.created)}</td><td>${kindLabel}</td><td>${x.status || '-'}</td><td>${fmtMoney(x.amount_due, x.currency)}</td><td>${docHtml}</td></tr>`;
+          return `<tr><td>${fmtDate(x.created)}</td><td>${kindLabel}</td><td>${x.status || '-'}</td><td>${fmtMoney(x.amount_due, x.currency)}</td><td>${view} ${pdf}</td></tr>`;
         }).join('');
       }
       if (invMsg) invMsg.textContent = '';

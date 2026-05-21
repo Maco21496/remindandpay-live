@@ -949,8 +949,9 @@ def enable_sms(
         terms_version=row.terms_version,
     )
 
-@router.post("/billing/enqueue-due")
-def enqueue_due_sms_billing(db: Session = Depends(get_db)):
+@router.post("/credits/number-renewals/enqueue-due")
+def enqueue_due_number_renewals(db: Session = Depends(get_db)):
+    """Process due monthly phone-number renewal credit debits and past-due handling."""
     now = datetime.utcnow()
     pricing = _ensure_pricing(db)
     trigger_rules = _load_notification_triggers(db)
@@ -1000,7 +1001,7 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                     reason="sms_number_monthly",
                     reference_id=reference_id,
                     details={
-                        "source": "sms_number_scheduler",
+                        "source": "number_renewal_scheduler",
                         "cycle": cycle,
                     },
                 )

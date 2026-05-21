@@ -69,46 +69,6 @@ class AccountBillingProfile(Base):
 
     user = relationship("User")
 
-
-class AccountBillingTransaction(Base):
-    __tablename__ = "account_billing_transactions"
-    __table_args__ = (
-        Index("ix_account_billing_txn_user_created", "user_id", "created_at"),
-        UniqueConstraint("stripe_event_id", name="uq_billing_txn_stripe_event_id"),
-        UniqueConstraint("idempotency_key", name="uq_billing_txn_idempotency_key"),
-        UniqueConstraint("stripe_checkout_session_id", name="uq_billing_txn_checkout_session_id"),
-        UniqueConstraint("stripe_refund_id", name="uq_billing_txn_refund_id"),
-    )
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    initiated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    transaction_type = Column(String(40), nullable=False)
-    product_type = Column(String(40), nullable=False)
-    product_code = Column(String(80), nullable=True)
-    description = Column(String(255), nullable=True)
-    status = Column(String(30), nullable=False, default="pending")
-    amount_minor = Column(Integer, nullable=False)
-    currency = Column(String(10), nullable=False, default="GBP")
-    quantity = Column(Integer, nullable=True)
-    parent_transaction_id = Column(BigInteger, ForeignKey("account_billing_transactions.id"), nullable=True)
-    stripe_customer_id = Column(String(64), nullable=True)
-    stripe_checkout_session_id = Column(String(128), nullable=True)
-    stripe_payment_intent_id = Column(String(128), nullable=True)
-    stripe_charge_id = Column(String(128), nullable=True)
-    stripe_invoice_id = Column(String(128), nullable=True)
-    stripe_subscription_id = Column(String(128), nullable=True)
-    stripe_refund_id = Column(String(128), nullable=True)
-    stripe_credit_note_id = Column(String(128), nullable=True)
-    stripe_event_id = Column(String(128), nullable=True)
-    idempotency_key = Column(String(160), nullable=False)
-    details = Column("metadata", JSON, nullable=True)
-    sms_ledger_processed_at = Column(DateTime, nullable=True)
-    billing_profile_processed_at = Column(DateTime, nullable=True)
-    reconciled_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-
 class AccountSmsSettings(Base):
     __tablename__ = "account_sms_settings"
     __table_args__ = (
