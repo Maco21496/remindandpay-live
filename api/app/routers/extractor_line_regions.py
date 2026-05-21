@@ -196,8 +196,9 @@ def extract_fields_from_template(pdf_bytes: bytes, template: Dict[str, Any]) -> 
 # Endpoints
 # -----------------------------
 
-# FINAL VERSION OF /api/inbound/lines/preview (returns per-page lines with coords)
-@router.post("/preview")
+# Per-page preview variant (kept separate to avoid conflicting with
+# /api/inbound/lines/preview used by the existing line-mapper UI).
+@router.post("/preview-pages")
 async def preview_lines(
     file: UploadFile = File(...),
     user = Depends(require_user),
