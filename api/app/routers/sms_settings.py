@@ -17,7 +17,9 @@ from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
 from ..crypto_secrets import encrypt_secret, decrypt_secret
 from .auth import require_user
+from ..services.billing_trial import assert_billing_allows_sending
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
+credits_router = APIRouter(prefix="/api/credits", tags=["credits"])
 
 def _add_months(anchor: datetime, months: int = 1) -> datetime:
     month_index = (anchor.month - 1) + months
@@ -820,6 +822,11 @@ def enable_sms(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
+    try:
+        assert_billing_allows_sending(db, user)
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     if not payload.accepted:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms acceptance required")
 
@@ -943,8 +950,9 @@ def enable_sms(
         terms_version=row.terms_version,
     )
 
-@router.post("/billing/enqueue-due")
-def enqueue_due_sms_billing(db: Session = Depends(get_db)):
+@credits_router.post("/number-renewals/enqueue-due")
+def enqueue_due_number_renewals(db: Session = Depends(get_db)):
+    """Process due monthly phone-number renewal credit debits and past-due handling."""
     now = datetime.utcnow()
     pricing = _ensure_pricing(db)
     trigger_rules = _load_notification_triggers(db)
@@ -994,7 +1002,7 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                     reason="sms_number_monthly",
                     reference_id=reference_id,
                     details={
-                        "source": "sms_number_scheduler",
+                        "source": "number_renewal_scheduler",
                         "cycle": cycle,
                     },
                 )
