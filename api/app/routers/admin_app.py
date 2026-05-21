@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
+from sqlalchemy.exc import IntegrityError
 
 from ..database import get_db
 from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile, SmsCreditLedger
