@@ -863,6 +863,7 @@ def get_sms_settings(
     row = _ensure_sms_settings(db, user.id)
     has_ledger, ledger_balance = _calculate_credit_balance(db, row)
     credits_balance = ledger_balance if has_ledger else (row.credits_balance or 0)
+    pricing = _ensure_pricing(db)
 
     return SmsSettingsOut(
         enabled=bool(row.enabled),
