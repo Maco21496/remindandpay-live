@@ -1,0 +1,25 @@
+import os
+
+_DUMMY_ENV = {
+    "DB_URL": "sqlite+pysqlite:///:memory:",
+    "APP_SECRET": "test-secret",
+    "IC_OWNER_EMAIL": "owner@example.test",
+    "APP_BASE_URL": "http://testserver",
+    "APP_SECRETS_KEY": "0123456789abcdef0123456789abcdef",
+    "STRIPE_SECRET_KEY": "sk_test_dummy",
+    "STRIPE_WEBHOOK_SECRET": "whsec_dummy",
+    "STRIPE_STARTER_SUBSCRIPTION_PRICE_ID": "price_dummy_sub",
+    "STRIPE_SMS_TOPUP_10_PRICE_ID": "price_dummy_10",
+    "STRIPE_SMS_TOPUP_25_PRICE_ID": "price_dummy_25",
+    "STRIPE_SMS_TOPUP_50_PRICE_ID": "price_dummy_50",
+    "STRIPE_SMS_TOPUP_100_PRICE_ID": "price_dummy_100",
+    "TWILIO_ACCOUNT_SID": "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TWILIO_API_KEY_SID": "SKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TWILIO_API_KEY_SECRET": "dummy_secret",
+    "TWILIO_AUTH_TOKEN": "dummy_auth_token",
+    "TWILIO_DEFAULT_COUNTRY": "GB",
+    "TWILIO_WEBHOOK_BASE_URL": "http://testserver",
+}
+
+for key, value in _DUMMY_ENV.items():
+    os.environ.setdefault(key, value)
