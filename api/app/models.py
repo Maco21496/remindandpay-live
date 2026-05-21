@@ -71,8 +71,13 @@ class AccountBillingTransaction(Base):
     __tablename__ = "account_billing_transactions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    initiated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    parent_transaction_id = Column(Integer, ForeignKey("account_billing_transactions.id"), nullable=True, index=True)
 
-    user = relationship("User")
+    user = relationship("User", foreign_keys=[user_id])
+    initiated_by_user = relationship("User", foreign_keys=[initiated_by_user_id])
+    parent_transaction = relationship("AccountBillingTransaction", remote_side=[id], foreign_keys=[parent_transaction_id])
 
 class AccountSmsSettings(Base):
     __tablename__ = "account_sms_settings"
