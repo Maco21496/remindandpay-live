@@ -210,6 +210,7 @@ class LedgerEntryOut(BaseModel):
     details: Optional[dict] = None
     balance_after: int
     category: Optional[str] = None
+    movement: Optional[str] = None
     description: Optional[str] = None
     to_display: Optional[str] = None
     segments_display: Optional[str] = None
@@ -841,6 +842,7 @@ def get_sms_ledger(
                 details=details,
                 balance_after=running,
                 category=category,
+                movement=("Credit" if entry.entry_type == "credit" else "Debit"),
                 description=description,
                 to_display=to_display,
                 segments_display=segments_display,

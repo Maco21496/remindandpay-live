@@ -208,16 +208,12 @@
 
       <div class="subpanel" style="padding:12px; border:1px solid #eee; border-radius:8px;">
         <h3 style="margin:0 0 10px 0; font-size:16px;">Dedicated number</h3>
-        <div class="grid" style="grid-template-columns:repeat(2,minmax(240px,1fr)); gap:12px;">
-          <div class="field">
-            <label>Twilio phone number</label>
-            <input id="sms_phone_number" placeholder="+44..." style="height:36px;padding:0 8px;" disabled>
-            <div class="muted" style="margin-top:4px;">Provisioned automatically when SMS is enabled.</div>
-          </div>
-          <div class="field">
-            <label>Twilio phone SID</label>
-            <input id="sms_phone_sid" placeholder="PNxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style="height:36px;padding:0 8px;" disabled>
-          </div>
+        <div class="muted" style="margin-top:10px; line-height:1.6;">
+          <div><strong>Dedicated phone number:</strong> <span id="sms_dedicated_number_value">-</span></div>
+          <div><strong>Next renewal:</strong> <span id="sms_next_renewal_value">Not scheduled</span></div>
+          <div><strong>Monthly cost:</strong> <span id="sms_monthly_renewal_cost_value">-</span></div>
+          <div id="sms_renewal_overdue_row" style="display:none; color:#b42318;"><strong>Warning:</strong> Renewal overdue since <span id="sms_renewal_overdue_value">-</span>. Please top up credits to keep your number.</div>
+          <div id="sms_released_row" style="display:none;"><strong>Number status:</strong> <span id="sms_released_value">-</span></div>
         </div>
         <div class="muted" style="margin-top:10px; line-height:1.6;">
           <div><strong>Dedicated number:</strong> <span id="sms_dedicated_number_value">-</span></div>

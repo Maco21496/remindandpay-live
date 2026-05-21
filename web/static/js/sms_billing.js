@@ -73,7 +73,7 @@
   const limit = 50;
 
   function renderRow(entry) {
-    const direction = entry.category || (entry.entry_type === "debit" ? "Debit" : "Credit");
+    const direction = entry.movement || (entry.entry_type === "debit" ? "Debit" : "Credit");
     const description = entry.description || entry.reason || "-";
     const to = entry.to_display || "-";
     const segments = entry.segments_display ?? "-";

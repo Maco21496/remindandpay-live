@@ -5,8 +5,6 @@
   const enabledSel = $("sms_enabled");
   const bundleInput = $("sms_bundle_size");
   const creditsInput = $("sms_credits");
-  const phoneNumberInput = $("sms_phone_number");
-  const phoneSidInput = $("sms_phone_sid");
   const dedicatedNumberValue = $("sms_dedicated_number_value");
   const nextRenewalValue = $("sms_next_renewal_value");
   const monthlyRenewalCostValue = $("sms_monthly_renewal_cost_value");
@@ -150,15 +148,14 @@
       if (bundleInput) bundleInput.value = String(data.bundle_size ?? 1000);
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
 
-      if (phoneNumberInput) phoneNumberInput.value = data.twilio_phone_number || "";
-      if (phoneSidInput) phoneSidInput.value = data.twilio_phone_sid || "";
       if (dedicatedNumberValue) dedicatedNumberValue.textContent = data.twilio_phone_number || "-";
-      if (nextRenewalValue) nextRenewalValue.textContent = data.next_number_charge_at ? fmtDT(data.next_number_charge_at) : "-";
+      if (nextRenewalValue) nextRenewalValue.textContent = data.next_number_charge_at ? fmtDT(data.next_number_charge_at) : "Not scheduled";
       if (monthlyRenewalCostValue) monthlyRenewalCostValue.textContent = Number.isFinite(data.sms_monthly_number_cost) ? `${data.sms_monthly_number_cost} credits` : "-";
       if (renewalOverdueRow) renewalOverdueRow.style.display = data.past_due_since ? "" : "none";
       if (renewalOverdueValue) renewalOverdueValue.textContent = data.past_due_since ? fmtDT(data.past_due_since) : "-";
-      if (releasedRow) releasedRow.style.display = data.released_at ? "" : "none";
-      if (releasedValue) releasedValue.textContent = data.released_at ? `${fmtDT(data.released_at)}${data.release_reason ? ` (${data.release_reason})` : ""}` : "-";
+      const showReleased = Boolean(data.released_at) && !(data.enabled && data.twilio_phone_number);
+      if (releasedRow) releasedRow.style.display = showReleased ? "" : "none";
+      if (releasedValue) releasedValue.textContent = showReleased ? `Released on ${fmtDT(data.released_at)}${data.release_reason ? ` (${data.release_reason})` : ""}` : "-";
       if (forwardToInput) forwardToInput.value = data.forward_to_phone || "";
       setFieldsEnabled(currentEnabled);
       lockEnabledToggle(currentEnabled);
@@ -227,8 +224,6 @@
       const payload = {
         enabled: enabledSel ? enabledSel.value === "true" : undefined,
         bundle_size: bundleInput ? Number(bundleInput.value) : undefined,
-        twilio_phone_number: phoneNumberInput ? phoneNumberInput.value : undefined,
-        twilio_phone_sid: phoneSidInput ? phoneSidInput.value : undefined,
         forwarding_enabled: forwardingSel ? forwardingSel.value === "true" : undefined,
         forward_to_phone: forwardToInput ? forwardToInput.value : undefined,
       };
