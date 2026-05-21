@@ -14,7 +14,7 @@ import requests
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
+from ..models import AccountBillingTransaction, AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
 from ..crypto_secrets import encrypt_secret, decrypt_secret
 from .auth import require_user
 from ..services.billing_trial import assert_billing_allows_sending

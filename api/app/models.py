@@ -67,6 +67,11 @@ class AccountBillingProfile(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class AccountBillingTransaction(Base):
+    __tablename__ = "account_billing_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
     user = relationship("User")
 
 class AccountSmsSettings(Base):
