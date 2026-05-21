@@ -148,7 +148,7 @@
       if (bundleInput) bundleInput.value = String(data.bundle_size ?? 1000);
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
 
-      if (dedicatedNumberValue) dedicatedNumberValue.textContent = data.twilio_phone_number || "-";
+      if (dedicatedNumberValue) dedicatedNumberValue.textContent = data.twilio_phone_number || "Not assigned";
       if (nextRenewalValue) nextRenewalValue.textContent = data.next_number_charge_at ? fmtDT(data.next_number_charge_at) : "Not scheduled";
       if (monthlyRenewalCostValue) monthlyRenewalCostValue.textContent = Number.isFinite(data.sms_monthly_number_cost) ? `${data.sms_monthly_number_cost} credits` : "-";
       if (renewalOverdueRow) renewalOverdueRow.style.display = data.past_due_since ? "" : "none";
