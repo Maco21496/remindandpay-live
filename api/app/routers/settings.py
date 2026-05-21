@@ -1,6 +1,7 @@
 # app/routers/settings.py
 from __future__ import annotations
 import os
+import logging
 from pathlib import Path
 from typing import Optional, List
 from datetime import time as dtime, datetime
@@ -10,7 +11,7 @@ from fastapi import Depends, UploadFile, File
 from pydantic import BaseModel, validator
 from zoneinfo import available_timezones
 
-from ..shared import APIRouter
+from ..shared import APIRouter, HTTPException
 from ..database import get_db
 from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger, SmsCreditLedger
 from .auth import require_user
@@ -18,6 +19,7 @@ from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR   = PROJECT_ROOT / "web" / "static"

@@ -1,4 +1,4 @@
-﻿from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Numeric, Enum, Time, JSON, ForeignKey, Text, Boolean, UniqueConstraint, Index, text
+﻿from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Numeric, Enum, Time, JSON, ForeignKey, Text, Boolean, UniqueConstraint, Index, text, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta, time
 import secrets
@@ -19,7 +19,7 @@ TEMPLATE_TAG_ENUM = Enum("gentle", "firm", "aggressive", "custom", name="templat
 class AppSettings(Base):
     __tablename__ = "app_settings"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # one row per user
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
@@ -134,6 +134,7 @@ class SmsCreditLedger(Base):
     __tablename__ = "sms_credit_ledger"
     __table_args__ = (
         Index("uq_sms_credit_ledger_reference_id", "reference_id", unique=True),
+        Index("uq_sms_credit_ledger_billing_transaction", "billing_transaction_id", unique=True),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -143,6 +144,7 @@ class SmsCreditLedger(Base):
     amount = Column(Integer, nullable=False)
     reason = Column(String(120), nullable=False)
     reference_id = Column(String(64), nullable=True)
+    billing_transaction_id = Column(BigInteger, ForeignKey("account_billing_transactions.id"), nullable=True)
     details = Column("metadata", JSON, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
