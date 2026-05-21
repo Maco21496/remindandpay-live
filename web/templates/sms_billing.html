@@ -9,12 +9,28 @@
 {% set active = "" %}
 
 {% block content %}
-  <div class="panel" style="margin-top:12px;">
+  
+    <div class="panel" style="margin-top:12px;">
+      <div class="panel__head">
+        <div>
+          <h3 style="margin:0;">Add SMS credits</h3>
+          <div class="muted" style="margin-top:4px;">Choose a top-up package and pay securely via Stripe Checkout.</div>
+        </div>
+      </div>
+      <div style="padding:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button class="btn" data-topup-package="10">Add £10 (1000 credits)</button>
+        <button class="btn" data-topup-package="25">Add £25 (2500 credits)</button>
+        <button class="btn" data-topup-package="50">Add £50 (5000 credits)</button>
+        <button class="btn" data-topup-package="100">Add £100 (10000 credits)</button>
+        <span id="sms_topup_status" class="muted"></span>
+      </div>
+    </div>
+<div class="panel" style="margin-top:12px;">
     <div class="panel__head">
       <div>
-        <h2 style="margin:0;">SMS billing</h2>
+        <h2 style="margin:0;">Credit activity</h2>
         <div class="muted" style="margin-top:4px;">
-          Itemised credits based on Twilio delivery callbacks.
+          Itemised credit movements for top-ups, SMS sends, number renewals and refunds.
         </div>
       </div>
       <div class="filters" style="gap:8px;">
@@ -29,9 +45,10 @@
         <thead>
           <tr>
             <th>Created</th>
-            <th>Direction</th>
-            <th>To</th>
-            <th>Segments</th>
+            <th>Movement</th>
+            <th>Description</th>
+            <th>To / Reference</th>
+            <th>Units</th>
             <th style="text-align:right;">Credits</th>
             <th style="text-align:right;">Balance</th>
           </tr>

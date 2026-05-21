@@ -14,10 +14,12 @@ import requests
 
 from ..shared import APIRouter
 from ..database import get_db
-from ..models import AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User
+from ..models import AccountBillingTransaction, AccountSmsSettings, SmsCreditLedger, SmsPricingSettings, EmailOutbox, User, Customer
 from ..crypto_secrets import encrypt_secret, decrypt_secret
 from .auth import require_user
+from ..services.billing_trial import assert_billing_allows_sending
 router = APIRouter(prefix="/api/sms", tags=["sms_settings"])
+credits_router = APIRouter(prefix="/api/credits", tags=["credits"])
 
 def _add_months(anchor: datetime, months: int = 1) -> datetime:
     month_index = (anchor.month - 1) + months
@@ -168,6 +170,11 @@ class SmsSettingsOut(BaseModel):
     free_credits: int
     terms_accepted_at: Optional[datetime] = None
     terms_version: Optional[str] = None
+    next_number_charge_at: Optional[datetime] = None
+    past_due_since: Optional[datetime] = None
+    released_at: Optional[datetime] = None
+    release_reason: Optional[str] = None
+    sms_monthly_number_cost: Optional[int] = None
 
 class SmsSettingsIn(BaseModel):
     enabled: Optional[bool] = None
@@ -202,6 +209,11 @@ class LedgerEntryOut(BaseModel):
     reference_id: Optional[str] = None
     details: Optional[dict] = None
     balance_after: int
+    category: Optional[str] = None
+    movement: Optional[str] = None
+    description: Optional[str] = None
+    to_display: Optional[str] = None
+    segments_display: Optional[str] = None
 
 
 class LedgerOut(BaseModel):
@@ -768,10 +780,57 @@ def get_sms_ledger(
         .limit(limit)
         .all()
     )
+    customer_ids = {
+        int((e.details or {}).get("customer_id"))
+        for e in entries
+        if (e.details or {}).get("customer_id") is not None
+    }
+    customers_by_id = {}
+    if customer_ids:
+        customer_rows = db.query(Customer.id, Customer.name).filter(Customer.id.in_(customer_ids)).all()
+        customers_by_id = {int(cid): (name or "").strip() for cid, name in customer_rows}
 
     running = balance
     items: List[LedgerEntryOut] = []
     for entry in entries:
+        details = entry.details or {}
+        reason = entry.reason or ""
+        category = "Credit"
+        description = reason.replace("_", " ").title()
+        to_display = details.get("to") or "-"
+        segments_display = str(details.get("segments")) if details.get("segments") is not None else "-"
+        if reason == "sms_number_monthly":
+            category = "Renewal"
+            description = "Monthly number renewal"
+            to_display = row.twilio_phone_number or "-"
+            segments_display = "-"
+        elif reason == "sms_send":
+            category = "SMS sent"
+            customer_name = customers_by_id.get(int(details.get("customer_id"))) if details.get("customer_id") is not None else ""
+            target = customer_name or details.get("to") or "recipient"
+            description = f"SMS to {target}"
+            to_display = details.get("to") or "-"
+            segments_display = str(details.get("segments")) if details.get("segments") is not None else "-"
+        elif reason in ("billing_transaction_topup", "stripe_topup"):
+            category = "Credit top-up"
+            description = "Credit top-up"
+            to_display = "-"
+            segments_display = "-"
+        elif reason in ("billing_transaction_refund_reversal", "stripe_refund_reversal"):
+            category = "Refund"
+            description = "Top-up refund reversal"
+            to_display = "-"
+            segments_display = "-"
+        elif reason == "manual_admin_topup":
+            category = "Manual adjustment"
+            description = "Manual credit adjustment"
+            to_display = "-"
+            segments_display = "-"
+        elif reason == "starter_pack":
+            category = "Starter credits"
+            description = "Starter credits"
+            to_display = "-"
+            segments_display = "-"
         items.append(
             LedgerEntryOut(
                 id=entry.id,
@@ -780,8 +839,13 @@ def get_sms_ledger(
                 amount=entry.amount,
                 reason=entry.reason,
                 reference_id=entry.reference_id,
-                details=entry.details,
+                details=details,
                 balance_after=running,
+                category=category,
+                movement=("Credit" if entry.entry_type == "credit" else "Debit"),
+                description=description,
+                to_display=to_display,
+                segments_display=segments_display,
             )
         )
         if entry.entry_type == "credit":
@@ -811,6 +875,11 @@ def get_sms_settings(
         free_credits=row.free_credits or 0,
         terms_accepted_at=row.terms_accepted_at,
         terms_version=row.terms_version,
+        next_number_charge_at=row.next_number_charge_at,
+        past_due_since=row.past_due_since,
+        released_at=row.released_at,
+        release_reason=row.release_reason,
+        sms_monthly_number_cost=int(pricing.sms_monthly_number_cost or 0),
     )
 
 @router.post("/enable", response_model=SmsSettingsOut)
@@ -820,6 +889,11 @@ def enable_sms(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
+    try:
+        assert_billing_allows_sending(db, user)
+    except ValueError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     if not payload.accepted:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Terms acceptance required")
 
@@ -943,8 +1017,9 @@ def enable_sms(
         terms_version=row.terms_version,
     )
 
-@router.post("/billing/enqueue-due")
-def enqueue_due_sms_billing(db: Session = Depends(get_db)):
+@credits_router.post("/number-renewals/enqueue-due")
+def enqueue_due_number_renewals(db: Session = Depends(get_db)):
+    """Process due monthly phone-number renewal credit debits and past-due handling."""
     now = datetime.utcnow()
     pricing = _ensure_pricing(db)
     trigger_rules = _load_notification_triggers(db)
@@ -994,7 +1069,7 @@ def enqueue_due_sms_billing(db: Session = Depends(get_db)):
                     reason="sms_number_monthly",
                     reference_id=reference_id,
                     details={
-                        "source": "sms_number_scheduler",
+                        "source": "number_renewal_scheduler",
                         "cycle": cycle,
                     },
                 )
@@ -1117,6 +1192,7 @@ def update_sms_settings(
     user = Depends(require_user),
 ):
     row = _ensure_sms_settings(db, user.id)
+    pricing = _ensure_pricing(db)
 
     if payload.enabled is not None:
         row.enabled = bool(payload.enabled)
@@ -1160,4 +1236,9 @@ def update_sms_settings(
         free_credits=row.free_credits or 0,
         terms_accepted_at=row.terms_accepted_at,
         terms_version=row.terms_version,
+        next_number_charge_at=row.next_number_charge_at,
+        past_due_since=row.past_due_since,
+        released_at=row.released_at,
+        release_reason=row.release_reason,
+        sms_monthly_number_cost=int(pricing.sms_monthly_number_cost or 0),
     )
