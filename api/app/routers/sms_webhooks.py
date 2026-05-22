@@ -176,6 +176,27 @@ def _record_sms_debit(
             db.commit()
         return
 
+    if outbox:
+        reserved = (
+            db.query(SmsCreditLedger)
+            .filter(
+                SmsCreditLedger.user_id == outbox.user_id,
+                SmsCreditLedger.entry_type == "debit",
+                SmsCreditLedger.reason == "sms_send",
+                SmsCreditLedger.reference_id.like(f"sms:outbox:{outbox.id}:attempt:%"),
+            )
+            .order_by(SmsCreditLedger.id.desc())
+            .first()
+        )
+        if reserved:
+            details = reserved.details or {}
+            details["message_sid"] = message_sid
+            details["status"] = status
+            reserved.details = details
+            db.add(reserved)
+            db.commit()
+            return
+
     num_segments_value = params.get("NumSegments")
     if num_segments_value in (None, ""):
         details = _twilio_fetch_message_details(
