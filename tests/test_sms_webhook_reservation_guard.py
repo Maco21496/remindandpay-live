@@ -22,13 +22,15 @@ class _FakeDb:
         self.existing = existing
         self.reserved = reserved
         self.added = []
+        self._ledger_query_calls = 0
 
     def query(self, model):
         name = getattr(model, "__name__", "")
         if name == "SmsCreditLedger":
-            if self.existing is not None:
-                return _FakeQuery([self.existing])
-            if self.reserved is not None:
+            self._ledger_query_calls += 1
+            if self._ledger_query_calls == 1:
+                return _FakeQuery([self.existing] if self.existing is not None else [])
+            if self._ledger_query_calls >= 2 and self.reserved is not None:
                 return _FakeQuery([self.reserved])
             return _FakeQuery([])
         return _FakeQuery([])

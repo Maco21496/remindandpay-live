@@ -375,9 +375,22 @@ def _cancel_sms_siblings(db: Session, job: EmailOutbox, reason: str, payload: di
     if job.run_id:
         q = q.filter(EmailOutbox.run_id == job.run_id)
     siblings = q.all()
+    safe_siblings = []
     for s in siblings:
+        if int(getattr(s, "user_id", -1) or -1) != int(job.user_id):
+            continue
+        if (getattr(s, "channel", "") or "").lower() != "sms":
+            continue
+        if (getattr(s, "status", "") or "").lower() != "queued":
+            continue
+        if job.rule_id is not None and getattr(s, "rule_id", None) != job.rule_id:
+            continue
+        if job.run_id is not None and getattr(s, "run_id", None) != job.run_id:
+            continue
+        safe_siblings.append(s)
+    for s in safe_siblings:
         _cancel_sms_row(db, s, reason)
-    return len(siblings)
+    return len(safe_siblings)
 
 
 def _process_sms_job(db: Session, j: EmailOutbox) -> None:
@@ -442,21 +455,52 @@ def _process_sms_job(db: Session, j: EmailOutbox) -> None:
     except Exception as tw_err:
         existing_reversal = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reversal_ref).first()
         if not existing_reversal:
-            db.add(
-                SmsCreditLedger(
-                    user_id=j.user_id,
-                    entry_type="credit",
-                    amount=required_credits,
-                    reason="sms_send_reversal",
-                    reference_id=reversal_ref,
-                    details={
-                        "original_reference_id": debit_ref,
-                        "outbox_id": j.id,
-                        "attempt_no": attempt_no,
-                        "error": str(tw_err)[:500],
-                    },
-                )
+            reversal = SmsCreditLedger(
+                user_id=j.user_id,
+                entry_type="credit",
+                amount=required_credits,
+                reason="sms_send_reversal",
+                reference_id=reversal_ref,
+                details={
+                    "original_reference_id": debit_ref,
+                    "outbox_id": j.id,
+                    "attempt_no": attempt_no,
+                    "error": str(tw_err)[:500],
+                },
             )
+            db.add(reversal)
+            db.flush()
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+                retry_existing = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reversal_ref).first()
+                if not retry_existing:
+                    db.add(
+                        SmsCreditLedger(
+                            user_id=j.user_id,
+                            entry_type="credit",
+                            amount=required_credits,
+                            reason="sms_send_reversal",
+                            reference_id=reversal_ref,
+                            details={
+                                "original_reference_id": debit_ref,
+                                "outbox_id": j.id,
+                                "attempt_no": attempt_no,
+                                "error": str(tw_err)[:500],
+                            },
+                        )
+                    )
+                    db.flush()
+                    db.commit()
+        else:
+            details = existing_reversal.details or {}
+            details.setdefault("original_reference_id", debit_ref)
+            details.setdefault("outbox_id", j.id)
+            details.setdefault("attempt_no", attempt_no)
+            existing_reversal.details = details
+            db.add(existing_reversal)
+            db.commit()
         raise
 
 
