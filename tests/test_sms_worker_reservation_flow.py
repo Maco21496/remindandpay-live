@@ -8,15 +8,25 @@ from api.app.routers import outbox_worker
 class FakeQuery:
     def __init__(self, items):
         self.items = list(items)
+        self._filtered = list(items)
 
     def filter(self, *args, **kwargs):
+        filtered = self._filtered
+        for expr in args:
+            left = getattr(expr, "left", None)
+            right = getattr(expr, "right", None)
+            field = getattr(left, "name", None)
+            value = getattr(right, "value", None)
+            if field and value is not None:
+                filtered = [x for x in filtered if getattr(x, field, None) == value]
+        self._filtered = filtered
         return self
 
     def first(self):
-        return self.items[0] if self.items else None
+        return self._filtered[0] if self._filtered else None
 
     def all(self):
-        return list(self.items)
+        return list(self._filtered)
 
 
 class FakeDb:
