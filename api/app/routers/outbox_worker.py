@@ -380,6 +380,86 @@ def _cancel_sms_siblings(db: Session, job: EmailOutbox, reason: str, payload: di
     return len(siblings)
 
 
+def _process_sms_job(db: Session, j: EmailOutbox) -> None:
+    if not _preflight_sms_settings_or_fail(db, j):
+        return
+    payload = _coerce_payload(j.payload_json)
+    reval = revalidate_chasing_sms_outbox(db, j)
+    if not reval.valid_to_send:
+        _cancel_sms_row(db, j, reval.reason)
+        db.commit()
+        return
+
+    pricing = _ensure_sms_pricing(db)
+    pause_threshold = int(pricing.credit_send_pause_threshold or 100)
+    balance = _effective_credit_balance_for_user(db, j.user_id)
+    if balance < pause_threshold:
+        _cancel_sms_row(db, j, "insufficient_credits")
+        _cancel_sms_siblings(db, j, "insufficient_credits", payload)
+        db.commit()
+        return
+
+    estimate = estimate_sms_segments(j.body or "")
+    required_credits = int(max(1, estimate.segments) * int(pricing.sms_send_cost or 0))
+    if balance < required_credits:
+        _cancel_sms_row(db, j, "insufficient_credits")
+        _cancel_sms_siblings(db, j, "insufficient_credits", payload)
+        db.commit()
+        return
+
+    attempt_no = int((j.attempt_count or 0) + 1)
+    debit_ref = f"{build_sms_outbox_debit_reference(j.id)}:attempt:{attempt_no}"
+    reversal_ref = f"{build_sms_outbox_reversal_reference(j.id).replace(':reversal', '')}:attempt:{attempt_no}:reversal"
+    debit = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == debit_ref).first()
+    if not debit:
+        debit = SmsCreditLedger(
+            user_id=j.user_id,
+            entry_type="debit",
+            amount=required_credits,
+            reason="sms_send",
+            reference_id=debit_ref,
+            details={
+                "outbox_id": j.id,
+                "estimated_segments": estimate.segments,
+                "sms_send_cost": int(pricing.sms_send_cost or 0),
+                "required_credits": required_credits,
+                "to": j.to_email,
+                "channel": "sms",
+                "reservation_status": "reserved",
+                "attempt_no": attempt_no,
+            },
+        )
+        db.add(debit)
+        db.flush()
+    try:
+        message_sid = _send_sms_via_twilio(db, j)
+        if message_sid:
+            j.provider_message_id = message_sid
+            d = debit.details or {}
+            d["provider_message_id"] = message_sid
+            d["reservation_status"] = "provider_accepted"
+            debit.details = d
+    except Exception as tw_err:
+        existing_reversal = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reversal_ref).first()
+        if not existing_reversal:
+            db.add(
+                SmsCreditLedger(
+                    user_id=j.user_id,
+                    entry_type="credit",
+                    amount=required_credits,
+                    reason="sms_send_reversal",
+                    reference_id=reversal_ref,
+                    details={
+                        "original_reference_id": debit_ref,
+                        "outbox_id": j.id,
+                        "attempt_no": attempt_no,
+                        "error": str(tw_err)[:500],
+                    },
+                )
+            )
+        raise
+
+
 def process_once() -> int:
     db: Session = SessionLocal()
 
@@ -425,83 +505,7 @@ def process_once() -> int:
                     raise RuntimeError("Missing user or customer")
 
                 if j.channel == "sms":
-                    if not _preflight_sms_settings_or_fail(db, j):
-                        continue
-                    payload = _coerce_payload(j.payload_json)
-                    reval = revalidate_chasing_sms_outbox(db, j)
-                    if not reval.valid_to_send:
-                        _cancel_sms_row(db, j, reval.reason)
-                        db.commit()
-                        continue
-
-                    pricing = _ensure_sms_pricing(db)
-                    pause_threshold = int(pricing.credit_send_pause_threshold or 100)
-                    balance = _effective_credit_balance_for_user(db, j.user_id)
-                    if balance < pause_threshold:
-                        _cancel_sms_row(db, j, "insufficient_credits")
-                        _cancel_sms_siblings(db, j, "insufficient_credits", payload)
-                        db.commit()
-                        continue
-
-                    estimate = estimate_sms_segments(j.body or "")
-                    required_credits = int(max(1, estimate.segments) * int(pricing.sms_send_cost or 0))
-                    if balance < required_credits:
-                        _cancel_sms_row(db, j, "insufficient_credits")
-                        _cancel_sms_siblings(db, j, "insufficient_credits", payload)
-                        db.commit()
-                        continue
-
-                    attempt_no = int((j.attempt_count or 0) + 1)
-                    debit_ref = f"{build_sms_outbox_debit_reference(j.id)}:attempt:{attempt_no}"
-                    reversal_ref = f"{build_sms_outbox_reversal_reference(j.id).replace(':reversal', '')}:attempt:{attempt_no}:reversal"
-                    debit = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == debit_ref).first()
-                    if not debit:
-                        debit = SmsCreditLedger(
-                            user_id=j.user_id,
-                            entry_type="debit",
-                            amount=required_credits,
-                            reason="sms_send",
-                            reference_id=debit_ref,
-                            details={
-                                "outbox_id": j.id,
-                                "estimated_segments": estimate.segments,
-                                "sms_send_cost": int(pricing.sms_send_cost or 0),
-                                "required_credits": required_credits,
-                                "to": j.to_email,
-                                "channel": "sms",
-                                "reservation_status": "reserved",
-                                "attempt_no": attempt_no,
-                            },
-                        )
-                        db.add(debit)
-                        db.flush()
-                    try:
-                        message_sid = _send_sms_via_twilio(db, j)
-                        if message_sid:
-                            j.provider_message_id = message_sid
-                            d = debit.details or {}
-                            d["provider_message_id"] = message_sid
-                            d["reservation_status"] = "provider_accepted"
-                            debit.details = d
-                    except Exception as tw_err:
-                        existing_reversal = db.query(SmsCreditLedger).filter(SmsCreditLedger.reference_id == reversal_ref).first()
-                        if not existing_reversal:
-                            db.add(
-                                SmsCreditLedger(
-                                    user_id=j.user_id,
-                                    entry_type="credit",
-                                    amount=required_credits,
-                                    reason="sms_send_reversal",
-                                    reference_id=reversal_ref,
-                                    details={
-                                        "original_reference_id": debit_ref,
-                                        "outbox_id": j.id,
-                                        "attempt_no": attempt_no,
-                                        "error": str(tw_err)[:500],
-                                    },
-                                )
-                            )
-                        raise
+                    _process_sms_job(db, j)
                 else:
                     payload = _coerce_payload(j.payload_json)
                     is_app_notification = (j.template or "").startswith("app_notification:")
