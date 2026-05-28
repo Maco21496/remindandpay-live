@@ -1515,6 +1515,32 @@ document.addEventListener("click", (e) => {
   }
 
   function friendlyOutboxStatus(row) {
+    if ((row.status || "").toLowerCase() === "canceled") {
+      const reason = String(row.last_error || "").trim();
+      const mapping = {
+        insufficient_credits: "Not sent: insufficient credits",
+        missing_context: "Not sent",
+        no_longer_overdue: "Not sent: no longer overdue",
+        delivery_mode_no_longer_sms: "Not sent: SMS disabled",
+      };
+      return {
+        badge: "failed",
+        text: mapping[reason] || "Not sent",
+      };
+    }
+    if (!row.provider_message_id && row.last_error && (row.channel || "").toLowerCase() === "sms") {
+      const reason = String(row.last_error || "").trim();
+      const mapping = {
+        insufficient_credits: "Not sent: insufficient credits",
+        missing_context: "Not sent",
+        no_longer_overdue: "Not sent: no longer overdue",
+        delivery_mode_no_longer_sms: "Not sent: SMS disabled",
+      };
+      return {
+        badge: "failed",
+        text: mapping[reason] || "Not sent",
+      };
+    }
     if (row.delivery_status === "delivered") {
       return { badge: "delivered", text: "Delivered" };
     }
