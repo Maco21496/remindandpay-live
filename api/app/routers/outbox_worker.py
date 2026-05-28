@@ -359,7 +359,9 @@ def _ensure_sms_pricing(db: Session) -> SmsPricingSettings:
 def _cancel_sms_row(db: Session, job: EmailOutbox, reason: str) -> None:
     job.status = "canceled"
     if hasattr(job, "delivery_status"):
-        job.delivery_status = "not_sent"
+        job.delivery_status = "deferred"
+    if hasattr(job, "provider_message_id"):
+        job.provider_message_id = None
     job.last_error = reason
     job.lock_owner = None
     job.lock_acquired_at = None

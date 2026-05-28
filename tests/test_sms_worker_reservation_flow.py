@@ -28,6 +28,9 @@ class FakeQuery:
     def all(self):
         return list(self._filtered)
 
+    def count(self):
+        return len(self._filtered)
+
 
 class FakeDb:
     def __init__(self, jobs=None, ledger=None):
@@ -83,6 +86,8 @@ def test_revalidation_failure_cancels_no_send_no_debit(monkeypatch):
 
     outbox_worker._process_sms_job(db, job)
     assert job.status == "canceled"
+    assert job.delivery_status == "deferred"
+    assert job.provider_message_id is None
     assert job.last_error == "no_longer_overdue"
     assert calls["tw"] == 0
     assert len(db.ledger) == 0
@@ -98,6 +103,8 @@ def test_threshold_insufficient_cancels(monkeypatch):
 
     outbox_worker._process_sms_job(db, job)
     assert job.status == "canceled"
+    assert job.delivery_status == "deferred"
+    assert job.provider_message_id is None
     assert job.last_error == "insufficient_credits"
     assert len(db.ledger) == 0
 
@@ -113,6 +120,8 @@ def test_exact_cost_insufficient_cancels(monkeypatch):
 
     outbox_worker._process_sms_job(db, job)
     assert job.status == "canceled"
+    assert job.delivery_status == "deferred"
+    assert job.provider_message_id is None
     assert job.last_error == "insufficient_credits"
     assert len(db.ledger) == 0
 
@@ -209,3 +218,32 @@ def test_process_once_does_not_mark_canceled_sms_as_sent(monkeypatch):
     sent = outbox_worker.process_once()
     assert sent == 0
     assert job.status == "canceled"
+    assert job.delivery_status == "deferred"
+    assert job.provider_message_id is None
+
+
+def test_activity_mapping_for_canceled_sms_reason_labels():
+    # Mirrors schedule.js friendly mapping contract for canceled SMS rows.
+    def map_status(status, reason, provider_message_id=None):
+        if (status or "").lower() == "canceled":
+            mapping = {
+                "insufficient_credits": "Not sent: insufficient credits",
+                "missing_context": "Not sent",
+                "no_longer_overdue": "Not sent: no longer overdue",
+                "delivery_mode_no_longer_sms": "Not sent: SMS disabled",
+            }
+            return mapping.get(reason, "Not sent")
+        if not provider_message_id and reason:
+            mapping = {
+                "insufficient_credits": "Not sent: insufficient credits",
+                "missing_context": "Not sent",
+                "no_longer_overdue": "Not sent: no longer overdue",
+                "delivery_mode_no_longer_sms": "Not sent: SMS disabled",
+            }
+            return mapping.get(reason, "Not sent")
+        return "other"
+
+    assert map_status("canceled", "insufficient_credits") == "Not sent: insufficient credits"
+    assert map_status("canceled", "missing_context") == "Not sent"
+    assert map_status("canceled", "no_longer_overdue") == "Not sent: no longer overdue"
+    assert map_status("canceled", "delivery_mode_no_longer_sms") == "Not sent: SMS disabled"
