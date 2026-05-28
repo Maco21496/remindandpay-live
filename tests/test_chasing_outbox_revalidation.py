@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import json
 
+from api.app.routers.chasing_reminders import _allowed_channels
 from api.app.services.chasing_outbox_revalidation import revalidate_chasing_sms_outbox
 
 
@@ -13,10 +14,11 @@ class _ExecResult:
 
 
 class _FakeDb:
-    def __init__(self, *, customer=True, sms_mode=True, rule=True, overdue=True):
+    def __init__(self, *, customer=True, sms_enabled=True, delivery_mode="sms", rule=True, overdue=True):
         self.executed_sql = []
         self.customer = customer
-        self.sms_mode = sms_mode
+        self.sms_enabled = sms_enabled
+        self.delivery_mode = delivery_mode
         self.rule = rule
         self.overdue = overdue
 
@@ -27,7 +29,7 @@ class _FakeDb:
         if "from customers" in sql:
             return _ExecResult((1,) if self.customer else None)
         if "from account_sms_settings" in sql:
-            return _ExecResult(SimpleNamespace(enabled=1 if self.sms_mode else 1, chasing_delivery_mode="sms" if self.sms_mode else "email"))
+            return _ExecResult(SimpleNamespace(enabled=1 if self.sms_enabled else 0, chasing_delivery_mode=self.delivery_mode))
         if "from reminder_rules" in sql:
             return _ExecResult((1,) if self.rule else None)
         if "from invoices i" in sql:
@@ -78,7 +80,7 @@ def test_paid_or_not_overdue_fails():
     assert res.reason == "no_longer_overdue"
 
 
-def test_delivery_mode_no_longer_sms_fails():
+def test_manual_send_sms_ignores_automatic_delivery_mode_email():
     payload = {
         "eligibility_kind": "chasing",
         "customer_id": 1,
@@ -89,9 +91,10 @@ def test_delivery_mode_no_longer_sms_fails():
         "generated_at_utc": "2026-01-01T00:00:00Z",
         "supersession_key": "customer:1:channel:sms:sequence:2",
     }
-    res = revalidate_chasing_sms_outbox(_FakeDb(sms_mode=False), _row(payload))
-    assert res.valid_to_send is False
-    assert res.reason == "delivery_mode_no_longer_sms"
+    payload["source"] = "manual_send"
+    res = revalidate_chasing_sms_outbox(_FakeDb(sms_enabled=True, delivery_mode="email"), _row(payload))
+    assert res.valid_to_send is True
+    assert res.reason == "valid"
 
 
 def test_row_559_string_payload_is_not_missing_context():
@@ -140,4 +143,30 @@ def test_string_payload_reaches_db_checks_without_missing_context():
     assert res.valid_to_send is True
     assert res.reason == "valid"
     assert len(db.executed_sql) >= 4
+
+
+
+def test_sms_account_disabled_still_blocks_sms():
+    payload = {
+        "eligibility_kind": "chasing",
+        "source": "manual_send",
+        "customer_id": 1,
+        "sequence_id": 2,
+        "step_id": 3,
+        "rule_id": 10,
+        "channel": "sms",
+        "generated_at_utc": "2026-01-01T00:00:00Z",
+        "supersession_key": "customer:1:channel:sms:sequence:2",
+    }
+    res = revalidate_chasing_sms_outbox(_FakeDb(sms_enabled=False, delivery_mode="sms"), _row(payload))
+    assert res.valid_to_send is False
+    assert res.reason == "sms_account_disabled"
+
+
+def test_scheduled_enqueue_delivery_mode_email_does_not_include_sms():
+    assert _allowed_channels("email", sms_enabled=True) == ["email"]
+
+
+def test_scheduled_enqueue_delivery_mode_both_includes_sms_when_enabled():
+    assert _allowed_channels("both", sms_enabled=True) == ["email", "sms"]
 
