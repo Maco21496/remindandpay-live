@@ -6,6 +6,8 @@
   const nextBtn = document.getElementById("sms_billing_next");
   const pageEl = document.getElementById("sms_billing_page");
   const refreshBtn = document.getElementById("sms_billing_refresh");
+  const pauseWarningEl = document.getElementById("sms_pause_warning");
+  const pauseThresholdTextEl = document.getElementById("sms_pause_threshold_text");
 
   const topupButtons = Array.from(document.querySelectorAll("[data-topup-package]"));
   const topupStatusEl = document.getElementById("sms_topup_status");
@@ -121,6 +123,21 @@
     }
   }
 
+  async function loadPauseWarning() {
+    if (!pauseWarningEl) return;
+    try {
+      const r = await fetch("/api/sms/settings", { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const data = await r.json();
+      const threshold = Number(data.credit_send_pause_threshold ?? 100);
+      const balance = Number(data.credits_balance ?? 0);
+      if (pauseThresholdTextEl) pauseThresholdTextEl.textContent = String(threshold);
+      pauseWarningEl.style.display = data.enabled && balance < threshold ? "block" : "none";
+    } catch {
+      pauseWarningEl.style.display = "none";
+    }
+  }
+
   prevBtn?.addEventListener("click", () => {
     offset = Math.max(0, offset - limit);
     loadLedger();
@@ -140,6 +157,7 @@
   });
 
   document.addEventListener("DOMContentLoaded", () => {
+    loadPauseWarning();
     loadLedger();
   });
 })();

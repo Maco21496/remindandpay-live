@@ -136,6 +136,7 @@ class SmsPricingSettings(Base):
     sms_send_cost = Column(Integer, nullable=False, default=5)
     sms_forward_cost = Column(Integer, nullable=False, default=5)
     sms_suspend_after_days = Column(Integer, nullable=False, default=14)
+    credit_send_pause_threshold = Column(Integer, nullable=False, default=100)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
