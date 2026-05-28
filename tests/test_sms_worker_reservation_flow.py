@@ -168,3 +168,44 @@ def test_sibling_cancel_scope_only_same_user_and_scope(monkeypatch):
     assert sibling.status == "canceled"
     assert other_user.status == "queued"
     assert email_row.status == "queued"
+
+
+def test_process_once_does_not_mark_canceled_sms_as_sent(monkeypatch):
+    job = _job()
+    job.id = 999
+    db = FakeDb(jobs=[job], ledger=[])
+
+    monkeypatch.setattr(outbox_worker, "SessionLocal", lambda: db)
+    monkeypatch.setattr(outbox_worker, "_requeue_stale_processing", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(outbox_worker, "_claim_one_due_job", lambda _db: job if job.status == "queued" else None)
+    monkeypatch.setattr(outbox_worker, "_process_sms_job", lambda _db, j: outbox_worker._cancel_sms_row(_db, j, "missing_context"))
+
+    monkeypatch.setattr(outbox_worker, "BATCH_SIZE", 1)
+    monkeypatch.setattr(outbox_worker, "User", SimpleNamespace(id=SimpleNamespace(__eq__=lambda self, x: None)))
+    monkeypatch.setattr(outbox_worker, "Customer", SimpleNamespace(id=SimpleNamespace(__eq__=lambda self, x: None)))
+
+    class UserQuery:
+        def filter(self, *args, **kwargs):
+            return self
+        def first(self):
+            return SimpleNamespace(id=job.user_id)
+        def count(self):
+            return 1
+    class GenericQuery(UserQuery):
+        def scalar(self):
+            return None
+    def fake_query(model):
+        name = getattr(model, "__name__", "")
+        if name in {"User", "Customer"}:
+            return UserQuery()
+        if name == "EmailOutbox":
+            return GenericQuery()
+        return FakeQuery([])
+    db.query = fake_query
+    db.execute = lambda *args, **kwargs: SimpleNamespace(scalar=lambda: 1)
+    db.rollback = lambda: None
+    db.close = lambda: None
+
+    sent = outbox_worker.process_once()
+    assert sent == 0
+    assert job.status == "canceled"

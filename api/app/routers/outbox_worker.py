@@ -358,9 +358,12 @@ def _ensure_sms_pricing(db: Session) -> SmsPricingSettings:
 
 def _cancel_sms_row(db: Session, job: EmailOutbox, reason: str) -> None:
     job.status = "canceled"
+    if hasattr(job, "delivery_status"):
+        job.delivery_status = "not_sent"
     job.last_error = reason
     job.lock_owner = None
     job.lock_acquired_at = None
+    job.updated_at = datetime.utcnow()
     db.add(job)
 
 
@@ -674,6 +677,10 @@ def process_once() -> int:
                     .filter(EmailOutbox.id == j.id)
                     .scalar()
                 )
+                if (j.status or "").lower() in {"canceled", "failed"}:
+                    db.commit()
+                    log.info("Job %s terminal without provider send; status=%s", j.id, j.status)
+                    continue
                 terminal_statuses = {"delivered", "bounced", "complained"}
                 j.status = "sent"
                 if current_delivery in terminal_statuses:
