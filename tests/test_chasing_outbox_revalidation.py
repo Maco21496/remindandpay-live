@@ -14,12 +14,15 @@ class _ExecResult:
 
 class _FakeDb:
     def __init__(self, *, customer=True, sms_mode=True, rule=True, overdue=True):
+        self.executed_sql = []
         self.customer = customer
         self.sms_mode = sms_mode
         self.rule = rule
         self.overdue = overdue
 
     def execute(self, sql, params):
+        assert sql.__class__.__name__ == "TextClause", f"Expected TextClause, got {type(sql)!r}"
+        self.executed_sql.append(str(sql))
         sql = " ".join(str(sql).split()).lower()
         if "from customers" in sql:
             return _ExecResult((1,) if self.customer else None)
@@ -111,3 +114,30 @@ def test_row_559_string_payload_is_not_missing_context():
     res = revalidate_chasing_sms_outbox(_FakeDb(), row)
     assert res.valid_to_send is True
     assert res.reason == "valid"
+
+
+def test_string_payload_reaches_db_checks_without_missing_context():
+    payload = {
+        "eligibility_kind": "chasing",
+        "user_id": 11,
+        "customer_id": 10,
+        "invoice_id_at_render": 86,
+        "oldest_days_overdue_at_render": 178,
+        "generated_at_utc": "2026-05-28T12:00:20Z",
+        "sequence_id": 11,
+        "step_id": 44,
+        "rule_id": 36,
+        "channel": "sms",
+        "content_hash": "x",
+        "supersession_key": "customer:10:channel:sms:sequence:11",
+        "summary": {"invoice_count": 1, "overdue_total": "120.00", "oldest_days_overdue": 178},
+    }
+    db = _FakeDb()
+    row = SimpleNamespace(user_id=11, customer_id=10, rule_id=36, invoice_id=86, payload_json=json.dumps(payload))
+
+    res = revalidate_chasing_sms_outbox(db, row)
+
+    assert res.valid_to_send is True
+    assert res.reason == "valid"
+    assert len(db.executed_sql) >= 4
+

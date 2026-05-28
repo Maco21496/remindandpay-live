@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Optional, Any
 import json
 
+from sqlalchemy import text
+
 
 @dataclass(frozen=True)
 class ChasingOutboxRevalidationResult:
@@ -12,12 +14,12 @@ class ChasingOutboxRevalidationResult:
 
 def _delivery_mode_allows_sms(db: Any, user_id: int) -> bool:
     row = db.execute(
-        """
+        text("""
         SELECT enabled, chasing_delivery_mode
         FROM account_sms_settings
         WHERE user_id = :uid
         LIMIT 1
-        """,
+        """),
         {"uid": int(user_id)},
     ).first()
     if not row:
@@ -53,14 +55,14 @@ def _invoice_still_overdue(db: Any, *, user_id: int, customer_id: int, invoice_i
            {invoice_filter}
          LIMIT 1
     """
-    return db.execute(sql, params).first() is not None
+    return db.execute(text(sql), params).first() is not None
 
 
 def _customer_exists_for_user(db: Any, *, user_id: int, customer_id: int) -> bool:
     row = db.execute(
-        """
+        text("""
         SELECT 1 FROM customers WHERE id = :cid AND user_id = :uid LIMIT 1
-        """,
+        """),
         {"cid": int(customer_id), "uid": int(user_id)},
     ).first()
     return row is not None
@@ -68,7 +70,7 @@ def _customer_exists_for_user(db: Any, *, user_id: int, customer_id: int) -> boo
 
 def _rule_enabled_for_user(db: Any, *, user_id: int, rule_id: int) -> bool:
     row = db.execute(
-        """
+        text("""
         SELECT 1
         FROM reminder_rules
         WHERE id = :rid
@@ -76,7 +78,7 @@ def _rule_enabled_for_user(db: Any, *, user_id: int, rule_id: int) -> bool:
           AND reminder_type = 'chasing'
           AND reminder_enabled = 1
         LIMIT 1
-        """,
+        """),
         {"rid": int(rule_id), "uid": int(user_id)},
     ).first()
     return row is not None
