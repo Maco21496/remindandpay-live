@@ -60,9 +60,11 @@
     }
   }
 
-  function updateBalanceChip(isEnabled, balance) {
+  function updateBalanceChip(isEnabled, balance, pauseThreshold) {
     if (!balanceChip) return;
     const label = isEnabled ? String(balance ?? 0) : "Enable";
+    const threshold = Number(pauseThreshold ?? 100);
+    const lowCredits = isEnabled && Number(balance ?? 0) < threshold;
     balanceChip.textContent = `SMS credits: ${label}`;
     balanceChip.setAttribute(
       "aria-label",
@@ -71,6 +73,14 @@
     balanceChip.title = isEnabled ? "Open SMS billing" : "Enable SMS";
     balanceChip.href = isEnabled ? "/sms_billing" : "/settings#sms";
     balanceChip.dataset.balanceState = isEnabled ? "enabled" : "disabled";
+    balanceChip.dataset.alertState = lowCredits ? "low" : "normal";
+    balanceChip.style.borderColor = lowCredits ? "#dc2626" : "#e5e7eb";
+    balanceChip.style.color = lowCredits ? "#b91c1c" : "";
+    balanceChip.style.fontWeight = lowCredits ? "700" : "";
+    if (lowCredits) {
+      balanceChip.textContent = `SMS credits: ${label} • 1 alert`;
+      balanceChip.title = `SMS sending paused below ${threshold} credits`;
+    }
   }
   const fmtDT = (iso) => (window.AppDate && AppDate.formatDateTime)
     ? AppDate.formatDateTime(iso)
@@ -159,7 +169,7 @@
       if (forwardToInput) forwardToInput.value = data.forward_to_phone || "";
       setFieldsEnabled(currentEnabled);
       lockEnabledToggle(currentEnabled);
-      updateBalanceChip(currentEnabled, data.credits_balance);
+      updateBalanceChip(currentEnabled, data.credits_balance, data.credit_send_pause_threshold);
       if (msg) msg.textContent = "";
     } catch {
       if (msg && !silent) msg.textContent = "Failed to load SMS settings.";
@@ -195,7 +205,7 @@
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
       setFieldsEnabled(currentEnabled);
       lockEnabledToggle(currentEnabled);
-      updateBalanceChip(currentEnabled, data.credits_balance);
+      updateBalanceChip(currentEnabled, data.credits_balance, data.credit_send_pause_threshold);
       closeEnableModal();
       if (msg) msg.textContent = "SMS enabled.";
     } catch (err) {
@@ -214,7 +224,7 @@
       currentEnabled = false;
       setFieldsEnabled(false);
       lockEnabledToggle(false);
-      updateBalanceChip(false, 0);
+      updateBalanceChip(false, 0, 100);
     }
   }
 
@@ -239,7 +249,7 @@
       }
       const data = await r.json();
       if (creditsInput) creditsInput.value = String(data.credits_balance ?? 0);
-      updateBalanceChip(Boolean(data.enabled), data.credits_balance);
+      updateBalanceChip(Boolean(data.enabled), data.credits_balance, data.credit_send_pause_threshold);
       if (msg) msg.textContent = "Saved.";
     } catch {
       if (msg) msg.textContent = "Save failed.";

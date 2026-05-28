@@ -18,6 +18,7 @@ DEFAULT_PRICING = {
     "sms_send_cost": 5,
     "sms_forward_cost": 5,
     "sms_suspend_after_days": 14,
+    "credit_send_pause_threshold": 100,
 }
 
 class PricingOut(BaseModel):
@@ -26,6 +27,7 @@ class PricingOut(BaseModel):
     sms_send_cost: int
     sms_forward_cost: int
     sms_suspend_after_days: int
+    credit_send_pause_threshold: int
 
 class PricingIn(BaseModel):
     sms_starting_credits: Optional[int] = Field(None, ge=0)
@@ -33,6 +35,7 @@ class PricingIn(BaseModel):
     sms_send_cost: Optional[int] = Field(None, ge=0)
     sms_forward_cost: Optional[int] = Field(None, ge=0)
     sms_suspend_after_days: Optional[int] = Field(None, ge=0)
+    credit_send_pause_threshold: Optional[int] = Field(None, ge=0)
 
 
 def _ensure_pricing(db: Session) -> SmsPricingSettings:
@@ -57,6 +60,7 @@ def get_pricing(
         sms_send_cost=row.sms_send_cost,
         sms_forward_cost=row.sms_forward_cost,
         sms_suspend_after_days=row.sms_suspend_after_days,
+        credit_send_pause_threshold=row.credit_send_pause_threshold,
     )
 
 @router.post("", response_model=PricingOut)
@@ -80,4 +84,5 @@ def update_pricing(
         sms_send_cost=row.sms_send_cost,
         sms_forward_cost=row.sms_forward_cost,
         sms_suspend_after_days=row.sms_suspend_after_days,
+        credit_send_pause_threshold=row.credit_send_pause_threshold,
     )

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone, date
 from typing import Optional, List, Literal, Dict
 import json
 import traceback
+import hashlib
 from decimal import Decimal
 
 from fastapi.responses import JSONResponse
@@ -437,6 +438,43 @@ def _invoices_table_html(invoices: list[dict]) -> str:
         "<tbody>" + "".join(rows) + "</tbody></table>"
     )
 
+
+def _build_chasing_outbox_payload(
+    *,
+    user_id: int,
+    customer_id: int,
+    channel: str,
+    sequence_id: int,
+    step_id: int,
+    rule_id: Optional[int],
+    days_overdue: int,
+    summary: dict,
+    invoice_id_at_render: Optional[int],
+    body: str,
+    now: datetime,
+) -> dict:
+    normalized_body = (body or "").strip()
+    content_hash = hashlib.sha256(normalized_body.encode("utf-8")).hexdigest() if normalized_body else ""
+    return {
+        "eligibility_kind": "chasing",
+        "user_id": user_id,
+        "customer_id": customer_id,
+        "invoice_id_at_render": invoice_id_at_render,
+        "oldest_days_overdue_at_render": days_overdue,
+        "generated_at_utc": now.replace(microsecond=0).isoformat() + "Z",
+        "sequence_id": sequence_id,
+        "step_id": step_id,
+        "rule_id": rule_id,
+        "channel": channel,
+        "content_hash": content_hash,
+        "supersession_key": f"customer:{customer_id}:channel:{channel}:sequence:{sequence_id}",
+        "summary": {
+            "invoice_count": summary["invoice_count"],
+            "overdue_total": summary["overdue_total"],
+            "oldest_days_overdue": summary["oldest_days_overdue"],
+        },
+    }
+
 # ---------- CRUD for chasing rules ----------
 
 @router.get("", response_model=List[ChasingRuleOut])
@@ -676,21 +714,25 @@ def send_now(
                 if not body:
                     continue
 
-                payload = {
-                    "sequence_id": seq_id,
-                    "step_id": trigger.id,
-                    "days_overdue": days,
-                    "channel": channel,
-                    "summary": {
-                        "invoice_count": summary["invoice_count"],
-                        "overdue_total": summary["overdue_total"],
-                        "oldest_days_overdue": summary["oldest_days_overdue"],
-                    },
-                }
+                inv_id = _oldest_overdue_invoice_id(db, user.id, c["id"])
+                payload = _build_chasing_outbox_payload(
+                    user_id=user.id,
+                    customer_id=c["id"],
+                    channel=channel,
+                    sequence_id=seq_id,
+                    step_id=trigger.id,
+                    rule_id=(rule.id if rule else None),
+                    days_overdue=days,
+                    summary=summary,
+                    invoice_id_at_render=inv_id,
+                    body=body,
+                    now=now,
+                )
 
                 outbox_row = EmailOutbox(
                     user_id=user.id,
                     customer_id=c["id"],
+                    invoice_id=inv_id,
                     channel=channel,
                     template=template_key,
                     to_email=to_email,
@@ -707,7 +749,6 @@ def send_now(
                 enqueued += 1
 
                 try:
-                    inv_id = _oldest_overdue_invoice_id(db, user.id, c["id"])
                     if inv_id:
                         evt = ReminderEvent(
                             invoice_id=inv_id,
@@ -872,21 +913,25 @@ def enqueue_due(db: Session = Depends(get_db)):
                         if not body:
                             continue
 
-                        payload = {
-                            "sequence_id": seq_id,
-                            "step_id": trigger.id,
-                            "days_overdue": days,
-                            "channel": channel,
-                            "summary": {
-                                "invoice_count": summary["invoice_count"],
-                                "overdue_total": summary["overdue_total"],
-                                "oldest_days_overdue": summary["oldest_days_overdue"],
-                            }
-                        }
+                        inv_id = _oldest_overdue_invoice_id(db, user_id, c["id"])
+                        payload = _build_chasing_outbox_payload(
+                            user_id=user_id,
+                            customer_id=c["id"],
+                            channel=channel,
+                            sequence_id=seq_id,
+                            step_id=trigger.id,
+                            rule_id=r.id,
+                            days_overdue=days,
+                            summary=summary,
+                            invoice_id_at_render=inv_id,
+                            body=body,
+                            now=now,
+                        )
 
                         job = EmailOutbox(
                             user_id=user_id,
                             customer_id=c["id"],
+                            invoice_id=inv_id,
                             channel=channel,
                             template=template_key,
                             to_email=to_email,
@@ -901,7 +946,6 @@ def enqueue_due(db: Session = Depends(get_db)):
                         db.add(job)
                         db.flush()
 
-                        inv_id = _oldest_overdue_invoice_id(db, user_id, c["id"])
                         if inv_id:
                             db.add(ReminderEvent(
                                 invoice_id=inv_id,
