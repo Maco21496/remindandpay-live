@@ -452,11 +452,13 @@ def _build_chasing_outbox_payload(
     invoice_id_at_render: Optional[int],
     body: str,
     now: datetime,
+    source: str,
 ) -> dict:
     normalized_body = (body or "").strip()
     content_hash = hashlib.sha256(normalized_body.encode("utf-8")).hexdigest() if normalized_body else ""
     return {
         "eligibility_kind": "chasing",
+        "source": source,
         "user_id": user_id,
         "customer_id": customer_id,
         "invoice_id_at_render": invoice_id_at_render,
@@ -727,6 +729,7 @@ def send_now(
                     invoice_id_at_render=inv_id,
                     body=body,
                     now=now,
+                    source="manual_send",
                 )
 
                 outbox_row = EmailOutbox(
@@ -926,6 +929,7 @@ def enqueue_due(db: Session = Depends(get_db)):
                             invoice_id_at_render=inv_id,
                             body=body,
                             now=now,
+                            source="scheduled",
                         )
 
                         job = EmailOutbox(

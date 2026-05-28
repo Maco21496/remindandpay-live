@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Optional, Any
 import json
 
+from sqlalchemy import text
+
 
 @dataclass(frozen=True)
 class ChasingOutboxRevalidationResult:
@@ -10,21 +12,19 @@ class ChasingOutboxRevalidationResult:
     details: dict
 
 
-def _delivery_mode_allows_sms(db: Any, user_id: int) -> bool:
+def _sms_account_enabled(db: Any, user_id: int) -> bool:
     row = db.execute(
-        """
-        SELECT enabled, chasing_delivery_mode
+        text("""
+        SELECT enabled
         FROM account_sms_settings
         WHERE user_id = :uid
         LIMIT 1
-        """,
+        """),
         {"uid": int(user_id)},
     ).first()
     if not row:
         return False
-    enabled = bool(getattr(row, "enabled", row[0] if isinstance(row, tuple) else 0))
-    mode = (getattr(row, "chasing_delivery_mode", row[1] if isinstance(row, tuple) and len(row) > 1 else "email") or "email").lower().strip()
-    return enabled and mode in {"sms", "both"}
+    return bool(getattr(row, "enabled", row[0] if isinstance(row, tuple) else 0))
 
 
 def _invoice_still_overdue(db: Any, *, user_id: int, customer_id: int, invoice_id: Optional[int]) -> bool:
@@ -53,14 +53,14 @@ def _invoice_still_overdue(db: Any, *, user_id: int, customer_id: int, invoice_i
            {invoice_filter}
          LIMIT 1
     """
-    return db.execute(sql, params).first() is not None
+    return db.execute(text(sql), params).first() is not None
 
 
 def _customer_exists_for_user(db: Any, *, user_id: int, customer_id: int) -> bool:
     row = db.execute(
-        """
+        text("""
         SELECT 1 FROM customers WHERE id = :cid AND user_id = :uid LIMIT 1
-        """,
+        """),
         {"cid": int(customer_id), "uid": int(user_id)},
     ).first()
     return row is not None
@@ -68,7 +68,7 @@ def _customer_exists_for_user(db: Any, *, user_id: int, customer_id: int) -> boo
 
 def _rule_enabled_for_user(db: Any, *, user_id: int, rule_id: int) -> bool:
     row = db.execute(
-        """
+        text("""
         SELECT 1
         FROM reminder_rules
         WHERE id = :rid
@@ -76,7 +76,7 @@ def _rule_enabled_for_user(db: Any, *, user_id: int, rule_id: int) -> bool:
           AND reminder_type = 'chasing'
           AND reminder_enabled = 1
         LIMIT 1
-        """,
+        """),
         {"rid": int(rule_id), "uid": int(user_id)},
     ).first()
     return row is not None
@@ -114,8 +114,8 @@ def revalidate_chasing_sms_outbox(db: Any, outbox_row: Any) -> ChasingOutboxReva
     if not _customer_exists_for_user(db, user_id=outbox_row.user_id, customer_id=customer_id):
         return ChasingOutboxRevalidationResult(False, "customer_not_found", {"customer_id": customer_id})
 
-    if not _delivery_mode_allows_sms(db, outbox_row.user_id):
-        return ChasingOutboxRevalidationResult(False, "delivery_mode_no_longer_sms", {"user_id": outbox_row.user_id})
+    if not _sms_account_enabled(db, outbox_row.user_id):
+        return ChasingOutboxRevalidationResult(False, "sms_account_disabled", {"user_id": outbox_row.user_id})
 
     if not _rule_enabled_for_user(db, user_id=outbox_row.user_id, rule_id=int(rule_id_value)):
         return ChasingOutboxRevalidationResult(False, "rule_no_longer_applies", {"rule_id": rule_id_value})
