@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Any
+import json
 
 
 @dataclass(frozen=True)
@@ -84,31 +85,42 @@ def _rule_enabled_for_user(db: Any, *, user_id: int, rule_id: int) -> bool:
 def revalidate_chasing_sms_outbox(db: Any, outbox_row: Any) -> ChasingOutboxRevalidationResult:
     payload = outbox_row.payload_json
     if isinstance(payload, str):
-        return ChasingOutboxRevalidationResult(False, "missing_context", {"field": "payload_json"})
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return ChasingOutboxRevalidationResult(False, "missing_context", {"field": "payload_json"})
     payload = payload or {}
 
     if payload.get("eligibility_kind") != "chasing":
         return ChasingOutboxRevalidationResult(False, "missing_context", {"field": "eligibility_kind"})
 
-    required = ["customer_id", "sequence_id", "step_id", "rule_id", "channel", "generated_at_utc", "supersession_key"]
+    customer_id_value = payload.get("customer_id", getattr(outbox_row, "customer_id", None))
+    rule_id_value = payload.get("rule_id", getattr(outbox_row, "rule_id", None))
+    invoice_id_value = payload.get("invoice_id_at_render", getattr(outbox_row, "invoice_id", None))
+
+    required = ["sequence_id", "step_id", "channel", "generated_at_utc", "supersession_key"]
     missing = [k for k in required if payload.get(k) in (None, "")]
+    if customer_id_value in (None, ""):
+        missing.append("customer_id")
+    if rule_id_value in (None, ""):
+        missing.append("rule_id")
     if missing:
         return ChasingOutboxRevalidationResult(False, "missing_context", {"missing": missing})
 
     if str(payload.get("channel") or "").lower() != "sms":
         return ChasingOutboxRevalidationResult(False, "missing_context", {"field": "channel"})
 
-    customer_id = int(payload["customer_id"])
+    customer_id = int(customer_id_value)
     if not _customer_exists_for_user(db, user_id=outbox_row.user_id, customer_id=customer_id):
         return ChasingOutboxRevalidationResult(False, "customer_not_found", {"customer_id": customer_id})
 
     if not _delivery_mode_allows_sms(db, outbox_row.user_id):
         return ChasingOutboxRevalidationResult(False, "delivery_mode_no_longer_sms", {"user_id": outbox_row.user_id})
 
-    if not _rule_enabled_for_user(db, user_id=outbox_row.user_id, rule_id=int(payload["rule_id"])):
-        return ChasingOutboxRevalidationResult(False, "rule_no_longer_applies", {"rule_id": payload.get("rule_id")})
+    if not _rule_enabled_for_user(db, user_id=outbox_row.user_id, rule_id=int(rule_id_value)):
+        return ChasingOutboxRevalidationResult(False, "rule_no_longer_applies", {"rule_id": rule_id_value})
 
-    invoice_id = payload.get("invoice_id_at_render") or outbox_row.invoice_id
+    invoice_id = invoice_id_value
     if not _invoice_still_overdue(db, user_id=outbox_row.user_id, customer_id=customer_id, invoice_id=invoice_id):
         return ChasingOutboxRevalidationResult(False, "no_longer_overdue", {"invoice_id": invoice_id})
 

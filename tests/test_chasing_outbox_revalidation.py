@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 from api.app.services.chasing_outbox_revalidation import revalidate_chasing_sms_outbox
 
@@ -88,3 +89,25 @@ def test_delivery_mode_no_longer_sms_fails():
     res = revalidate_chasing_sms_outbox(_FakeDb(sms_mode=False), _row(payload))
     assert res.valid_to_send is False
     assert res.reason == "delivery_mode_no_longer_sms"
+
+
+def test_row_559_string_payload_is_not_missing_context():
+    payload = {
+        "eligibility_kind": "chasing",
+        "user_id": 11,
+        "customer_id": 10,
+        "invoice_id_at_render": 86,
+        "oldest_days_overdue_at_render": 178,
+        "generated_at_utc": "2026-05-28T12:00:20Z",
+        "sequence_id": 11,
+        "step_id": 44,
+        "rule_id": 36,
+        "channel": "sms",
+        "content_hash": "x",
+        "supersession_key": "customer:10:channel:sms:sequence:11",
+        "summary": {"invoice_count": 1, "overdue_total": "120.00", "oldest_days_overdue": 178},
+    }
+    row = SimpleNamespace(user_id=11, customer_id=10, rule_id=36, invoice_id=86, payload_json=json.dumps(payload))
+    res = revalidate_chasing_sms_outbox(_FakeDb(), row)
+    assert res.valid_to_send is True
+    assert res.reason == "valid"
