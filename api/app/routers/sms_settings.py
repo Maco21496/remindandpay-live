@@ -198,6 +198,7 @@ class PricingOut(BaseModel):
     sms_send_cost: int
     sms_forward_cost: int
     sms_suspend_after_days: int
+    credit_send_pause_threshold: int
 
 
 class LedgerEntryOut(BaseModel):
@@ -290,6 +291,7 @@ def _ensure_pricing(db: Session) -> SmsPricingSettings:
         sms_send_cost=5,
         sms_forward_cost=5,
         sms_suspend_after_days=14,
+        credit_send_pause_threshold=100,
     )
     db.add(row)
     db.commit()
@@ -303,6 +305,7 @@ def _build_pricing_snapshot(row: SmsPricingSettings) -> dict:
         "sms_send_cost": row.sms_send_cost,
         "sms_forward_cost": row.sms_forward_cost,
         "sms_suspend_after_days": row.sms_suspend_after_days,
+        "credit_send_pause_threshold": row.credit_send_pause_threshold,
     }
 
 def _twilio_auth_headers(username: str, password: str) -> tuple[str, str]:
