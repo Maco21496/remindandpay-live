@@ -22,6 +22,7 @@ from ..models import (
     SmsPricingSettings,
 )
 from ..mailer import send_statement_for_user, send_chasing_for_user, send_via_postmark
+from ..postmark_safety import outbox_dry_run_enabled
 from ..services.sms_segments import estimate_sms_segments
 from ..services.sms_credit_reservation import (
     build_sms_outbox_debit_reference,
@@ -78,6 +79,20 @@ def _log_statement_events(db: Session, user_id: int, customer_id: int):
 
 def _next_backoff_minutes(attempts: int) -> int:
     return min(60, 2 ** max(0, attempts - 1))
+
+
+def _outbox_dry_run_enabled() -> bool:
+    return outbox_dry_run_enabled()
+
+
+def _mark_dry_run_skipped(db: Session, job: EmailOutbox) -> None:
+    job.status = "canceled"
+    job.last_error = "OUTBOX_DRY_RUN=1: provider send skipped"
+    job.lock_owner = None
+    job.lock_acquired_at = None
+    job.updated_at = datetime.utcnow()
+    db.commit()
+    log.warning("Job %s dry-run skipped; no provider send attempted", job.id)
 
 
 def _maybe_mark_run_done(db: Session, run: StatementRun):
@@ -546,6 +561,9 @@ def process_once() -> int:
             claimed_any = True
 
             log.info("Processing job id=%s channel=%s to=%s subj=%r", j.id, j.channel, j.to_email, (j.subject or "")[:80])
+            if _outbox_dry_run_enabled():
+                _mark_dry_run_skipped(db, j)
+                continue
 
             try:
                 user = db.query(User).filter(User.id == j.user_id).first()
@@ -777,7 +795,7 @@ if __name__ == "__main__":
     MAX_ATTEMPTS = _env_int("OUTBOX_MAX_ATTEMPTS", MAX_ATTEMPTS)
     POLL_SECONDS = _env_int("OUTBOX_POLL_SECONDS", POLL_SECONDS)
 
-    dry = os.getenv("OUTBOX_DRY_RUN", "0").strip() in ("1", "true", "yes")
+    dry = _outbox_dry_run_enabled()
 
     log.info("boot env: WORKER_NAME=%s BATCH_SIZE=%s MAX_ATTEMPTS=%s POLL=%ss DRY_RUN=%s",
              WORKER_NAME, BATCH_SIZE, MAX_ATTEMPTS, POLL_SECONDS, dry)

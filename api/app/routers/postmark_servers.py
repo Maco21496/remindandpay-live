@@ -13,6 +13,7 @@ from ..shared import APIRouter
 from ..database import get_db
 from .auth import require_user
 from ..crypto_secrets import encrypt_secret
+from ..postmark_safety import resolve_postmark_delivery_type
 
 router = APIRouter(prefix="/api/postmark/servers", tags=["postmark"])
 
@@ -58,9 +59,14 @@ def _create_server(account_token: str, name: str) -> Dict[str, Any]:
     payload = {
         "Name": name,
         "Color": "Blue",
-        "DeliveryType": "Live",
         "SmtpApiActivated": True,
     }
+    try:
+        delivery_type = resolve_postmark_delivery_type()
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    if delivery_type:
+        payload["DeliveryType"] = delivery_type
     r = requests.post(f"{POSTMARK_API_BASE}/servers", headers=headers, json=payload, timeout=15)
     try:
         data = r.json()

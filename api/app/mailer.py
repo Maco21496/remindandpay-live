@@ -10,6 +10,7 @@ import logging
 
 from .services.statement_pdf import render_statement_pdf_html, render_pdf_from_html
 from .crypto_secrets import decrypt_secret
+from .postmark_safety import apply_staging_email_safety
 
 log = logging.getLogger("mailer")
 
@@ -40,6 +41,11 @@ def send_via_postmark(
     TextBody: str = "",
     attachments: Optional[List[Dict[str, str]]] = None,
 ) -> MailResult:
+    try:
+        safe_to, safe_subject = apply_staging_email_safety(To, Subject)
+    except ValueError as exc:
+        return MailResult(False, error=str(exc), permanent=True)
+
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -47,8 +53,8 @@ def send_via_postmark(
     }
     payload = {
         "From": From,
-        "To": To,
-        "Subject": Subject,
+        "To": safe_to,
+        "Subject": safe_subject,
         "HtmlBody": HtmlBody,
         "TextBody": TextBody or " ",
         "MessageStream": "outbound",

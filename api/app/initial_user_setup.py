@@ -13,6 +13,7 @@ from sqlalchemy import text as sqltext
 from .services.statement_globals_logic import ensure_global_rules
 from .models import ReminderTemplate, ChasingPlan, ChasingTrigger
 from .crypto_secrets import encrypt_secret
+from .postmark_safety import resolve_postmark_delivery_type
 
 SEED_TEMPLLES = [
     # --- Gentle ---
@@ -182,7 +183,13 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
 
     # Path B: create new server, ensure webhook, then save encrypted token
     headers = dict(acct_headers)
-    payload = {"Name": server_name, "Color": "Blue", "DeliveryType": "Live", "SmtpApiActivated": True}
+    payload = {"Name": server_name, "Color": "Blue", "SmtpApiActivated": True}
+    try:
+        delivery_type = resolve_postmark_delivery_type()
+    except ValueError as e:
+        return {"ok": False, "server_id": None, "message": str(e)}
+    if delivery_type:
+        payload["DeliveryType"] = delivery_type
 
     try:
         r = requests.post("https://api.postmarkapp.com/servers", headers=headers, json=payload, timeout=15)
