@@ -30,3 +30,4 @@ openpyxl==3.1.5
 stripe==15.1.0
 cryptography
 pdfplumber
+bcrypt==3.2.2
