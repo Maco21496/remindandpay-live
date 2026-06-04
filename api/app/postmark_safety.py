@@ -20,13 +20,13 @@ def is_staging_environment(env: Optional[Mapping[str, str]] = None) -> bool:
     )
 
 
-def resolve_postmark_delivery_type(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+def resolve_postmark_delivery_type(env: Optional[Mapping[str, str]] = None) -> str:
     """
     Return the Postmark DeliveryType to include in server creation payloads.
 
     Explicit POSTMARK_DELIVERY_TYPE accepts only Live or Sandbox. When unset,
-    staging defaults to Sandbox. Non-staging leaves DeliveryType omitted so
-    existing/live Postmark default behaviour is preserved.
+    staging defaults to Sandbox and every other environment keeps the existing
+    live Postmark server creation behaviour.
     """
     explicit = _env_value(env, "POSTMARK_DELIVERY_TYPE")
     if explicit:
@@ -36,7 +36,17 @@ def resolve_postmark_delivery_type(env: Optional[Mapping[str, str]] = None) -> O
         return resolved
     if is_staging_environment(env):
         return "Sandbox"
-    return None
+    return "Live"
+
+
+def postmark_server_creation_payload(name: str, env: Optional[Mapping[str, str]] = None) -> dict[str, object]:
+    """Build the shared Postmark server creation payload."""
+    return {
+        "Name": name,
+        "Color": "Blue",
+        "SmtpApiActivated": True,
+        "DeliveryType": resolve_postmark_delivery_type(env),
+    }
 
 
 def _csv_values(raw: str) -> list[str]:
