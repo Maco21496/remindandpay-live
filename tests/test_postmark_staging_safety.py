@@ -3,6 +3,7 @@ import pytest
 from api.app.postmark_safety import (
     apply_staging_email_safety,
     outbox_dry_run_enabled,
+    postmark_server_creation_payload,
     resolve_postmark_delivery_type,
 )
 
@@ -31,11 +32,11 @@ def test_staging_resolves_delivery_type_sandbox(monkeypatch):
     assert resolve_postmark_delivery_type() == "Sandbox"
 
 
-def test_live_does_not_accidentally_resolve_sandbox(monkeypatch):
+def test_live_default_resolves_delivery_type_live(monkeypatch):
     _clear_postmark_env(monkeypatch)
     monkeypatch.setenv("APP_ENV", "live")
 
-    assert resolve_postmark_delivery_type() is None
+    assert resolve_postmark_delivery_type() == "Live"
 
 
 def test_explicit_delivery_type_accepts_only_live_or_sandbox(monkeypatch):
@@ -46,6 +47,41 @@ def test_explicit_delivery_type_accepts_only_live_or_sandbox(monkeypatch):
     monkeypatch.setenv("POSTMARK_DELIVERY_TYPE", "not-real")
     with pytest.raises(ValueError, match="POSTMARK_DELIVERY_TYPE"):
         resolve_postmark_delivery_type()
+
+
+def test_staging_payload_uses_sandbox(monkeypatch):
+    _clear_postmark_env(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "staging")
+
+    assert postmark_server_creation_payload("rp-test") == {
+        "Name": "rp-test",
+        "Color": "Blue",
+        "SmtpApiActivated": True,
+        "DeliveryType": "Sandbox",
+    }
+
+
+def test_live_default_payload_uses_live(monkeypatch):
+    _clear_postmark_env(monkeypatch)
+
+    assert postmark_server_creation_payload("rp-test") == {
+        "Name": "rp-test",
+        "Color": "Blue",
+        "SmtpApiActivated": True,
+        "DeliveryType": "Live",
+    }
+
+
+def test_explicit_sandbox_payload(monkeypatch):
+    _clear_postmark_env(monkeypatch)
+    monkeypatch.setenv("POSTMARK_DELIVERY_TYPE", "Sandbox")
+
+    assert postmark_server_creation_payload("rp-test") == {
+        "Name": "rp-test",
+        "Color": "Blue",
+        "SmtpApiActivated": True,
+        "DeliveryType": "Sandbox",
+    }
 
 
 def test_staging_recipient_override_rewrites_to_and_prefixes_subject(monkeypatch):
