@@ -10,7 +10,7 @@ import logging
 
 from .services.statement_pdf import render_statement_pdf_html, render_pdf_from_html
 from .crypto_secrets import decrypt_secret
-from .postmark_safety import apply_staging_email_safety
+from .postmark_safety import apply_staging_email_safety, is_staging_environment
 
 log = logging.getLogger("mailer")
 
@@ -41,10 +41,16 @@ def send_via_postmark(
     TextBody: str = "",
     attachments: Optional[List[Dict[str, str]]] = None,
 ) -> MailResult:
+    if is_staging_environment() and not (server_token or "").strip():
+        return MailResult(False, error="Staging email safety blocked send: missing Postmark server token", permanent=True)
+
     try:
         safe_to, safe_subject = apply_staging_email_safety(To, Subject)
     except ValueError as exc:
         return MailResult(False, error=str(exc), permanent=True)
+
+    if safe_to != To:
+        log.info("Staging email recipient override applied; original_to=%r safe_to=%r", To, safe_to)
 
     headers = {
         "Accept": "application/json",

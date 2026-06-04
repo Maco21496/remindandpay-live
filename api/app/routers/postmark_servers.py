@@ -13,7 +13,11 @@ from ..shared import APIRouter
 from ..database import get_db
 from .auth import require_user
 from ..crypto_secrets import encrypt_secret
-from ..postmark_safety import resolve_postmark_delivery_type
+from ..postmark_safety import (
+    is_staging_environment,
+    build_postmark_server_create_payload,
+    resolve_postmark_webhook_url,
+)
 
 router = APIRouter(prefix="/api/postmark/servers", tags=["postmark"])
 
@@ -50,23 +54,50 @@ def _load_settings(db: Session, user_id: int):
         {"uid": user_id},
     ).first()
 
+def _ensure_webhook_for_server(server_token: str) -> None:
+    webhook_url = resolve_postmark_webhook_url()
+    wb_user = (os.getenv("POSTMARK_WEBHOOK_USER", "") or "").strip()
+    wb_pass = (os.getenv("POSTMARK_WEBHOOK_PASS", "") or "").strip()
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Postmark-Server-Token": server_token,
+    }
+    try:
+        existing = requests.get(f"{POSTMARK_API_BASE}/webhooks", headers=headers, timeout=15)
+        if existing.ok:
+            for webhook in (existing.json() or []):
+                if (webhook.get("Url") or "").strip().lower() == webhook_url.lower():
+                    return
+    except Exception:
+        pass
+
+    payload = {
+        "Url": webhook_url,
+        "MessageStream": "outbound",
+        "Triggers": {
+            "Open": {"Enabled": True},
+            "Click": {"Enabled": True},
+            "Delivery": {"Enabled": True},
+            "Bounce": {"Enabled": True, "IncludeContent": False},
+            "SpamComplaint": {"Enabled": True},
+        },
+    }
+    if wb_user or wb_pass:
+        payload["HttpAuth"] = {"Username": wb_user, "Password": wb_pass}
+    requests.post(f"{POSTMARK_API_BASE}/webhooks", headers=headers, json=payload, timeout=15)
+
+
 def _create_server(account_token: str, name: str) -> Dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "X-Postmark-Account-Token": account_token,
     }
-    payload = {
-        "Name": name,
-        "Color": "Blue",
-        "SmtpApiActivated": True,
-    }
     try:
-        delivery_type = resolve_postmark_delivery_type()
+        payload = build_postmark_server_create_payload(name)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    if delivery_type:
-        payload["DeliveryType"] = delivery_type
     r = requests.post(f"{POSTMARK_API_BASE}/servers", headers=headers, json=payload, timeout=15)
     try:
         data = r.json()
@@ -95,18 +126,31 @@ def init_user_server(
     if not s:
         raise HTTPException(500, "Email settings row missing after ensure.")
 
-    # If already provisioned (has id and encrypted token), return
-    if getattr(s, "postmark_server_id", None) and getattr(s, "postmark_server_token_enc", None):
-        return {
-            "ok": True,
-            "created": False,
-            "server_id": int(s.postmark_server_id),
-            "server_token_saved": True,
-        }
-
     account_token = os.getenv("POSTMARK_ACCOUNT_TOKEN", "").strip()
     if not account_token:
         raise HTTPException(400, "POSTMARK_ACCOUNT_TOKEN is not configured on the server.")
+
+    # If already provisioned (has id and encrypted token), return only after
+    # staging verifies that the copied/existing Postmark server is Sandbox.
+    if getattr(s, "postmark_server_id", None) and getattr(s, "postmark_server_token_enc", None):
+        server_id = int(s.postmark_server_id)
+        if is_staging_environment():
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Postmark-Account-Token": account_token,
+            }
+            r = requests.get(f"{POSTMARK_API_BASE}/servers/{server_id}", headers=headers, timeout=15)
+            if not r.ok:
+                raise HTTPException(502, "Staging could not verify existing Postmark server DeliveryType; clear copied Postmark state and reprovision.")
+            if ((r.json() or {}).get("DeliveryType") or "") != "Sandbox":
+                raise HTTPException(400, "Staging refuses to reuse a non-Sandbox Postmark server; clear copied Postmark state and reprovision.")
+        return {
+            "ok": True,
+            "created": False,
+            "server_id": server_id,
+            "server_token_saved": True,
+        }
 
     server_name = f"rp-u{user.id}-{_slug_email(user.email)}"
     data = _create_server(account_token, server_name)
@@ -116,6 +160,11 @@ def init_user_server(
         raise HTTPException(502, "Postmark did not return a server ID and token.")
 
     server_token = str(api_tokens[0])
+    try:
+        _ensure_webhook_for_server(server_token)
+    except Exception as e:
+        raise HTTPException(502, f"Create server succeeded but webhook setup failed: {e}")
+
     try:
         server_token_enc = encrypt_secret(server_token)
     except Exception as e:

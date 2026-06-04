@@ -41,6 +41,7 @@ from .routers.webhooks_stripe import router as stripe_webhooks_router
 
 from .models import Base, Customer
 from .database import engine, get_db
+from .postmark_safety import validate_postmark_staging_config
 
 app = FastAPI(title="Remind & Pay minimal API") 
 
@@ -94,6 +95,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 def ensure_tables():
+    validate_postmark_staging_config()
     Base.metadata.create_all(bind=engine)
 
 # Public, minimal �please log in� page (no navbar)

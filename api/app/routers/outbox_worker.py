@@ -87,10 +87,18 @@ def _outbox_dry_run_enabled() -> bool:
 
 def _mark_dry_run_skipped(db: Session, job: EmailOutbox) -> None:
     job.status = "canceled"
-    job.last_error = "OUTBOX_DRY_RUN=1: provider send skipped"
+    job.last_error = "staging_outbox_dry_run"
     job.lock_owner = None
     job.lock_acquired_at = None
     job.updated_at = datetime.utcnow()
+    if job.run_id:
+        run = db.query(StatementRun).get(job.run_id)
+        if run:
+            if run.run_started_at is None:
+                run.run_started_at = datetime.utcnow()
+                run.status = "processing"
+            run.jobs_failed = (run.jobs_failed or 0) + 1
+            _maybe_mark_run_done(db, run)
     db.commit()
     log.warning("Job %s dry-run skipped; no provider send attempted", job.id)
 

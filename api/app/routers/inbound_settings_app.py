@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..shared import APIRouter
 from ..database import get_db
 from .auth import require_user
+from ..postmark_safety import resolve_postmark_inbound_hook_url
 
 router = APIRouter(prefix="/api/inbound", tags=["inbound"])
 
@@ -176,7 +177,7 @@ def _ensure_inbound_domain_for_user(db: Session, user_id: int) -> str:
         "X-Postmark-Account-Token": account_token,
     }
     url = f"https://api.postmarkapp.com/servers/{server_id}"
-    payload = {"InboundDomain": inbound_domain}
+    payload = {"InboundDomain": inbound_domain, "InboundHookUrl": resolve_postmark_inbound_hook_url()}
 
     try:
         resp = requests.put(url, headers=headers, json=payload, timeout=15)

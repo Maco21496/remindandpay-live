@@ -13,7 +13,12 @@ from sqlalchemy import text as sqltext
 from .services.statement_globals_logic import ensure_global_rules
 from .models import ReminderTemplate, ChasingPlan, ChasingTrigger
 from .crypto_secrets import encrypt_secret
-from .postmark_safety import resolve_postmark_delivery_type
+from .postmark_safety import (
+    is_staging_environment,
+    build_postmark_server_create_payload,
+    resolve_postmark_inbound_hook_url,
+    resolve_postmark_webhook_url,
+)
 
 SEED_TEMPLLES = [
     # --- Gentle ---
@@ -124,7 +129,7 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
 
     # --- local helper: ensure webhook on this server using a SERVER token
     def _ensure_webhook_for_server(server_token: str) -> None:
-        webhook_url = (os.getenv("POSTMARK_WEBHOOK_URL", "") or "").strip()
+        webhook_url = resolve_postmark_webhook_url()
         wb_user = (os.getenv("POSTMARK_WEBHOOK_USER", "") or "").strip()
         wb_pass = (os.getenv("POSTMARK_WEBHOOK_PASS", "") or "").strip()
         if not webhook_url:
@@ -173,23 +178,38 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
             r = requests.get(f"https://api.postmarkapp.com/servers/{server_id}", headers=acct_headers, timeout=15)
             if r.ok:
                 data = r.json() or {}
+                if is_staging_environment() and (data.get("DeliveryType") or "") != "Sandbox":
+                    return {
+                        "ok": False,
+                        "server_id": server_id,
+                        "message": "Staging refuses to reuse a non-Sandbox Postmark server; clear copied Postmark state and reprovision",
+                    }
                 tokens = data.get("ApiTokens") or []
                 if tokens:
                     _ensure_webhook_for_server(str(tokens[0]))
+            elif is_staging_environment():
+                return {
+                    "ok": False,
+                    "server_id": server_id,
+                    "message": "Staging could not verify existing Postmark server DeliveryType; clear copied Postmark state and reprovision",
+                }
             # nothing else to update; token stays encrypted in DB
             return {"ok": True, "server_id": server_id, "message": "Already provisioned (webhook ensured)"}
         except Exception:
+            if is_staging_environment():
+                return {
+                    "ok": False,
+                    "server_id": server_id,
+                    "message": "Staging could not verify existing Postmark server DeliveryType; clear copied Postmark state and reprovision",
+                }
             return {"ok": True, "server_id": server_id, "message": "Already provisioned (webhook ensure skipped due to API error)"}
 
     # Path B: create new server, ensure webhook, then save encrypted token
     headers = dict(acct_headers)
-    payload = {"Name": server_name, "Color": "Blue", "SmtpApiActivated": True}
     try:
-        delivery_type = resolve_postmark_delivery_type()
+        payload = build_postmark_server_create_payload(server_name)
     except ValueError as e:
         return {"ok": False, "server_id": None, "message": str(e)}
-    if delivery_type:
-        payload["DeliveryType"] = delivery_type
 
     try:
         r = requests.post("https://api.postmarkapp.com/servers", headers=headers, json=payload, timeout=15)
@@ -252,8 +272,8 @@ def _ensure_inbound_domain_for_user_local(db: Session, user_id: int) -> Dict[str
     Same logic as routers.inbound_settings_app._ensure_inbound_domain_for_user,
     but returns a dict instead of raising HTTPException.
 
-    Now also sets the inbound webhook URL on the server:
-      InboundHookUrl = https://app.remindandpay.com/api/postmark/inbound
+    Now also sets the inbound webhook URL on the server. Staging resolves this
+    to https://staging.remindandpay.com/api/postmark/inbound unless overridden.
     """
     server_id = _get_server_id_for_inbound(db, user_id)
     if not server_id:
@@ -274,8 +294,7 @@ def _ensure_inbound_domain_for_user_local(db: Session, user_id: int) -> Dict[str
     base = os.getenv("INBOUND_BASE_DOMAIN", "inv.remindandpay.com").strip()
     inbound_domain = f"u{user_id}.{base}"
 
-    # Inbound webhook URL you specified
-    inbound_hook_url = "https://app.remindandpay.com/api/postmark/inbound"
+    inbound_hook_url = resolve_postmark_inbound_hook_url()
 
     headers = {
         "Accept": "application/json",
