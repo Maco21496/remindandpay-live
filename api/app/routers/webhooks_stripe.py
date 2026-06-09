@@ -9,22 +9,23 @@ from fastapi import Request
 from ..database import get_db
 from ..models import AccountSmsSettings, SmsCreditLedger, AccountBillingProfile
 from ..shared import APIRouter, BaseModel, Depends, HTTPException, Session
+from ..stripe_config import get_stripe_env_var, get_stripe_secret_key
 from .auth import require_user
 
 router = APIRouter(prefix="/api/billing/stripe", tags=["stripe_billing"])
 
-_STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+_STRIPE_SECRET_KEY = get_stripe_secret_key()
+_WEBHOOK_SECRET = get_stripe_env_var("STRIPE_WEBHOOK_SECRET", "")
 _PUBLIC_BASE_URL = os.getenv("APP_BASE_URL", "https://app.remindandpay.com").rstrip("/")
-_SUBSCRIPTION_PRICE_ID = os.getenv("STRIPE_STARTER_SUBSCRIPTION_PRICE_ID", "")
+_SUBSCRIPTION_PRICE_ID = get_stripe_env_var("STRIPE_STARTER_SUBSCRIPTION_PRICE_ID", "")
 _TOPUP_RETRY_MAX_ATTEMPTS = 5
 logger = logging.getLogger(__name__)
 
 _TOPUP_PACKAGES = {
-    "10": {"price_id": os.getenv("STRIPE_SMS_TOPUP_10_PRICE_ID", ""), "credits": 1000},
-    "25": {"price_id": os.getenv("STRIPE_SMS_TOPUP_25_PRICE_ID", ""), "credits": 2500},
-    "50": {"price_id": os.getenv("STRIPE_SMS_TOPUP_50_PRICE_ID", ""), "credits": 5000},
-    "100": {"price_id": os.getenv("STRIPE_SMS_TOPUP_100_PRICE_ID", ""), "credits": 10000},
+    "10": {"price_id": get_stripe_env_var("STRIPE_SMS_TOPUP_10_PRICE_ID", ""), "credits": 1000},
+    "25": {"price_id": get_stripe_env_var("STRIPE_SMS_TOPUP_25_PRICE_ID", ""), "credits": 2500},
+    "50": {"price_id": get_stripe_env_var("STRIPE_SMS_TOPUP_50_PRICE_ID", ""), "credits": 5000},
+    "100": {"price_id": get_stripe_env_var("STRIPE_SMS_TOPUP_100_PRICE_ID", ""), "credits": 10000},
 }
 
 
