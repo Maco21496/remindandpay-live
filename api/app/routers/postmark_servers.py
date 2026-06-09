@@ -13,6 +13,7 @@ from ..shared import APIRouter
 from ..database import get_db
 from .auth import require_user
 from ..crypto_secrets import encrypt_secret
+from ..postmark_safety import postmark_server_creation_payload
 
 router = APIRouter(prefix="/api/postmark/servers", tags=["postmark"])
 
@@ -55,12 +56,10 @@ def _create_server(account_token: str, name: str) -> Dict[str, Any]:
         "Content-Type": "application/json",
         "X-Postmark-Account-Token": account_token,
     }
-    payload = {
-        "Name": name,
-        "Color": "Blue",
-        "DeliveryType": "Live",
-        "SmtpApiActivated": True,
-    }
+    try:
+        payload = postmark_server_creation_payload(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
     r = requests.post(f"{POSTMARK_API_BASE}/servers", headers=headers, json=payload, timeout=15)
     try:
         data = r.json()

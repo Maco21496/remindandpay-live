@@ -13,6 +13,7 @@ from sqlalchemy import text as sqltext
 from .services.statement_globals_logic import ensure_global_rules
 from .models import ReminderTemplate, ChasingPlan, ChasingTrigger
 from .crypto_secrets import encrypt_secret
+from .postmark_safety import postmark_server_creation_payload, resolve_postmark_inbound_webhook_url
 
 SEED_TEMPLLES = [
     # --- Gentle ---
@@ -122,12 +123,12 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
     }
 
     # --- local helper: ensure webhook on this server using a SERVER token
-    def _ensure_webhook_for_server(server_token: str) -> None:
+    def _ensure_webhook_for_server(server_token: str) -> tuple[bool, str]:
         webhook_url = (os.getenv("POSTMARK_WEBHOOK_URL", "") or "").strip()
         wb_user = (os.getenv("POSTMARK_WEBHOOK_USER", "") or "").strip()
         wb_pass = (os.getenv("POSTMARK_WEBHOOK_PASS", "") or "").strip()
         if not webhook_url:
-            return  # silently skip; we don't alter provisioning result
+            return False, "outbound webhook was not configured because POSTMARK_WEBHOOK_URL is missing"
 
         s_headers = {
             "Accept": "application/json",
@@ -141,7 +142,7 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
             if r_list.ok:
                 for w in (r_list.json() or []):
                     if (w.get("Url") or "").strip().lower() == webhook_url.lower():
-                        return
+                        return True, "outbound webhook already configured"
         except Exception:
             pass  # fall through and try to create
 
@@ -161,28 +162,33 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
 
         try:
             requests.post("https://api.postmarkapp.com/webhooks", headers=s_headers, json=payload_wh, timeout=15)
-        except Exception:
+            return True, "outbound webhook ensured"
+        except Exception as e:
             # don't fail provisioning on webhook errors
-            pass
+            return False, f"outbound webhook ensure skipped due to API error: {e}"
 
     # Path A: settings row exists and has a server id already -> fetch server token via Account API and ensure webhook
     if row and getattr(row, "postmark_server_id", None):
         server_id = int(row.postmark_server_id)
         try:
+            webhook_message = "outbound webhook was not configured because server token is missing"
             r = requests.get(f"https://api.postmarkapp.com/servers/{server_id}", headers=acct_headers, timeout=15)
             if r.ok:
                 data = r.json() or {}
                 tokens = data.get("ApiTokens") or []
                 if tokens:
-                    _ensure_webhook_for_server(str(tokens[0]))
+                    _, webhook_message = _ensure_webhook_for_server(str(tokens[0]))
             # nothing else to update; token stays encrypted in DB
-            return {"ok": True, "server_id": server_id, "message": "Already provisioned (webhook ensured)"}
+            return {"ok": True, "server_id": server_id, "message": f"Already provisioned ({webhook_message})"}
         except Exception:
             return {"ok": True, "server_id": server_id, "message": "Already provisioned (webhook ensure skipped due to API error)"}
 
     # Path B: create new server, ensure webhook, then save encrypted token
     headers = dict(acct_headers)
-    payload = {"Name": server_name, "Color": "Blue", "DeliveryType": "Live", "SmtpApiActivated": True}
+    try:
+        payload = postmark_server_creation_payload(server_name)
+    except ValueError as e:
+        return {"ok": False, "server_id": None, "message": str(e)}
 
     try:
         r = requests.post("https://api.postmarkapp.com/servers", headers=headers, json=payload, timeout=15)
@@ -203,7 +209,7 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
         server_token = str(api_tokens[0])
 
         # ensure webhook now (we have a clear server token)
-        _ensure_webhook_for_server(server_token)
+        _, webhook_message = _ensure_webhook_for_server(server_token)
 
         # save encrypted token
         server_token_enc = encrypt_secret(server_token)
@@ -219,7 +225,7 @@ def _create_postmark_server_and_save(db: Session, *, user_id: int) -> Dict[str, 
         )
         db.commit()
 
-        return {"ok": True, "server_id": server_id, "message": "Sending server created (webhook ensured)"}
+        return {"ok": True, "server_id": server_id, "message": f"Sending server created ({webhook_message})"}
     except Exception as e:
         return {"ok": False, "server_id": None, "message": f"Unexpected error: {e}"}
 
@@ -245,8 +251,7 @@ def _ensure_inbound_domain_for_user_local(db: Session, user_id: int) -> Dict[str
     Same logic as routers.inbound_settings_app._ensure_inbound_domain_for_user,
     but returns a dict instead of raising HTTPException.
 
-    Now also sets the inbound webhook URL on the server:
-      InboundHookUrl = https://app.remindandpay.com/api/postmark/inbound
+    Now also sets the inbound webhook URL on the server.
     """
     server_id = _get_server_id_for_inbound(db, user_id)
     if not server_id:
@@ -267,8 +272,7 @@ def _ensure_inbound_domain_for_user_local(db: Session, user_id: int) -> Dict[str
     base = os.getenv("INBOUND_BASE_DOMAIN", "inv.remindandpay.com").strip()
     inbound_domain = f"u{user_id}.{base}"
 
-    # Inbound webhook URL you specified
-    inbound_hook_url = "https://app.remindandpay.com/api/postmark/inbound"
+    inbound_hook_url = resolve_postmark_inbound_webhook_url()
 
     headers = {
         "Accept": "application/json",
