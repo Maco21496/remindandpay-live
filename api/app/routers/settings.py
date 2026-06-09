@@ -17,6 +17,7 @@ from ..models import AppSettings, AccountBillingProfile, SmsCreditLedger, SmsCre
 from .auth import require_user
 from ..initial_user_setup import run_initial_user_setup
 from ..services.billing_trial import ensure_billing_profile
+from ..stripe_config import get_stripe_secret_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
@@ -325,7 +326,7 @@ def _stripe_invoice_to_row(inv, *, kind: str) -> dict:
 
 def _get_stripe_client():
     import stripe
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe.api_key = get_stripe_secret_key()
     return stripe
 
 

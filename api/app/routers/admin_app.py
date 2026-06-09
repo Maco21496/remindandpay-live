@@ -15,6 +15,7 @@ from ..models import SmsWebhookLog, User, BillingSettings, AccountBillingProfile
 from ..services.billing_trial import enqueue_trial_notifications
 from ..models import EmailOutbox
 from ..shared import templates, BaseModel
+from ..stripe_config import get_stripe_secret_key
 from .auth import require_owner
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -655,7 +656,7 @@ def admin_reconcile_topup_anomalies(
 ):
     import stripe
 
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe.api_key = get_stripe_secret_key()
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
@@ -742,7 +743,7 @@ def admin_user_invoices(
 ):
     import stripe
 
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe.api_key = get_stripe_secret_key()
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
@@ -788,7 +789,7 @@ def admin_refund_topup(
 ):
     import stripe
 
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe.api_key = get_stripe_secret_key()
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY is not configured")
 
